@@ -224,7 +224,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - 路由规则优先识别变更意图、多步骤意图、项目范围、验证/交付动作和并行候选
 - `score <= 2` 默认 ReAct，`score >= 3` 走 Plan-and-Execute，`score >= 6` 且存在并行候选才走 Multi-Agent
 - 自动升级到 Plan/Team 时会输出一行低调提示，包含分数和触发原因
-- 详细规则见 `docs/phase-23-agent-routing.md`
+- 详细规则见 `docs/agent-routing.md`，阶段记录见 `docs/phase-23-agent-routing.md`
 
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
