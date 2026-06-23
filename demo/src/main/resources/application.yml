@@ -1,0 +1,23 @@
+# ============================================================
+# Spring Boot 基础配置
+# ============================================================
+
+server:
+  port: 8080                          # 服务端口
+  servlet:
+    context-path: /                   # 应用上下文路径
+
+spring:
+  application:
+    name: demo                        # 应用名称
+  banner-mode: console                # 启动 Banner 输出位置
+
+# ============================================================
+# 日志配置
+# ============================================================
+logging:
+  level:
+    root: INFO
+    com.example.demo: DEBUG           # 项目包使用 DEBUG 级别
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

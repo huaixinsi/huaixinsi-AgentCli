@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>晨星小站 · 技术博客</title>
+  <style>
+    /* ===== Reset & Base ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      background: #f5f7fa;
+      color: #2c3e50;
+      line-height: 1.7;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    a { color: #3498db; text-decoration: none; transition: color 0.25s; }
+    a:hover { color: #1d6fa5; }
+
+    /* ===== Header ===== */
+    .site-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #fff;
+      padding: 2rem 1.5rem 1.2rem;
+      text-align: center;
+      box-shadow: 0 2px 12px rgba(0,0,0,.15);
+    }
+    .site-header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+    }
+    .site-header h1 span { color: #f39c12; }
+    .site-header .subtitle {
+      margin-top: 0.3rem;
+      font-size: 0.95rem;
+      opacity: 0.75;
+    }
+
+    /* ===== Nav ===== */
+    .nav-bar {
+      background: #fff;
+      border-bottom: 1px solid #e0e4e8;
+      padding: 0.7rem 1.5rem;
+      display: flex;
+      justify-content: center;
+      gap: 2rem;
+      flex-wrap: wrap;
+    }
+    .nav-bar a {
+      color: #555;
+      font-size: 0.95rem;
+      font-weight: 500;
+      position: relative;
+    }
+    .nav-bar a::after {
+      content: "";
+      position: absolute;
+      bottom: -4px;
+      left: 0;
+      width: 0;
+      height: 2px;
+      background: #3498db;
+      transition: width 0.3s;
+    }
+    .nav-bar a:hover::after { width: 100%; }
+    .nav-bar a.active { color: #3498db; }
+    .nav-bar a.active::after { width: 100%; }
+
+    /* ===== Main Layout ===== */
+    .container {
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 0 1.2rem;
+      flex: 1;
+    }
+
+    /* ===== Article List ===== */
+    .blog-list { display: flex; flex-direction: column; gap: 1.5rem; }
+
+    .blog-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem 1.8rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,.06);
+      transition: box-shadow 0.3s, transform 0.2s;
+      border-left: 4px solid #3498db;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+    .blog-card:hover {
+      box-shadow: 0 6px 20px rgba(0,0,0,.1);
+      transform: translateY(-2px);
+    }
+
+    .blog-card .meta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      font-size: 0.85rem;
+      color: #888;
+    }
+    .blog-card .meta .date { display: flex; align-items: center; gap: 0.3rem; }
+    .blog-card .meta .tag {
+      background: #eaf5ff;
+      color: #3498db;
+      padding: 0.15rem 0.7rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+    }
+    .blog-card h2 { font-size: 1.3rem; }
+    .blog-card h2 a { color: #2c3e50; }
+    .blog-card h2 a:hover { color: #3498db; }
+    .blog-card .excerpt {
+      color: #666;
+      font-size: 0.95rem;
+      line-height: 1.65;
+    }
+    .blog-card .read-more {
+      align-self: flex-start;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+    .blog-card .read-more::after { content: " →"; }
+
+    /* ===== Sidebar (inline, for wide screens) ===== */
+    .content-area {
+      display: grid;
+      grid-template-columns: 1fr 260px;
+      gap: 2rem;
+    }
+    @media (max-width: 768px) {
+      .content-area { grid-template-columns: 1fr; }
+    }
+
+    .sidebar-section {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.3rem 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,.06);
+      margin-bottom: 1.5rem;
+    }
+    .sidebar-section h3 {
+      font-size: 1rem;
+      margin-bottom: 0.8rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid #f0f2f5;
+    }
+    .sidebar-section ul { list-style: none; }
+    .sidebar-section li { padding: 0.3rem 0; font-size: 0.9rem; }
+    .sidebar-section li::before { content: "▸ "; color: #3498db; font-weight: bold; }
+
+    /* ===== Footer ===== */
+    .site-footer {
+      background: #1a1a2e;
+      color: rgba(255,255,255,.65);
+      text-align: center;
+      padding: 1.8rem 1.5rem;
+      font-size: 0.88rem;
+      margin-top: 2rem;
+    }
+    .site-footer .social-links { margin-bottom: 0.6rem; }
+    .site-footer .social-links a {
+      color: rgba(255,255,255,.6);
+      margin: 0 0.5rem;
+      font-size: 0.9rem;
+    }
+    .site-footer .social-links a:hover { color: #f39c12; }
+    .site-footer .copyright { opacity: 0.7; }
+  </style>
+</head>
+<body>
+
+  <!-- ========== Header ========== -->
+  <header class="site-header">
+    <h1>🌟 晨星<span>小站</span></h1>
+    <p class="subtitle">记录技术成长 · 分享编程思考</p>
+  </header>
+
+  <!-- ========== Nav ========== -->
+  <nav class="nav-bar">
+    <a href="#" class="active">首页</a>
+    <a href="#">前端</a>
+    <a href="#">后端</a>
+    <a href="#">架构</a>
+    <a href="#">工具</a>
+    <a href="#">关于</a>
+  </nav>
+
+  <!-- ========== Main Content ========== -->
+  <main class="container">
+    <div class="content-area">
+
+      <!-- 文章列表 -->
+      <div class="blog-list">
+
+        <article class="blog-card">
+          <div class="meta">
+            <span class="date">📅 2025-05-18</span>
+            <span class="tag">前端</span>
+            <span class="tag">CSS</span>
+          </div>
+          <h2><a href="#">用 CSS Grid 构建响应式博客布局</a></h2>
+          <p class="excerpt">
+            CSS Grid 是近年来最强大的布局工具之一。本文从零开始，一步步搭建一个适配移动端到桌面的博客页面布局，
+            涵盖 grid-template-areas、auto-fill 与 minmax 的实战技巧……
+          </p>
+          <a href="#" class="read-more">阅读全文</a>
+        </article>
+
+        <article class="blog-card">
+          <div class="meta">
+            <span class="date">📅 2025-05-12</span>
+            <span class="tag">后端</span>
+            <span class="tag">Java</span>
+          </div>
+          <h2><a href="#">Java 21 虚拟线程入门与最佳实践</a></h2>
+          <p class="excerpt">
+            JDK 21 正式带来了虚拟线程（Virtual Threads）。本篇从 Thread per Request 模型的痛点说起，
+            用实际案例对比传统线程池与虚拟线程的性能差异，并总结生产环境的使用建议。
+          </p>
+          <a href="#" class="read-more">阅读全文</a>
+        </article>
+
+        <article class="blog-card">
+          <div class="meta">
+            <span class="date">📅 2025-05-05</span>
+            <span class="tag">架构</span>
+          </div>
+          <h2><a href="#">从单体到微服务：一次平滑的拆分实践</a></h2>
+          <p class="excerpt">
+            不是所有项目都需要微服务，但增长到了一定规模后，合理的拆分可以显著提升团队迭代效率。
+            这篇文章复盘了我们团队将一个 30 万行代码的单体应用拆分为 6 个微服务的全过程……
+          </p>
+          <a href="#" class="read-more">阅读全文</a>
+        </article>
+
+        <article class="blog-card">
+          <div class="meta">
+            <span class="date">📅 2025-04-28</span>
+            <span class="tag">工具</span>
+            <span class="tag">Git</span>
+          </div>
+          <h2><a href="#">Git 工作流进化史：Git Flow → GitHub Flow → Trunk-Based</a></h2>
+          <p class="excerpt">
+            从 Git Flow 的繁复到 Trunk-Based 的极简，每种工作流都有其适用场景。
+            本文梳理了主流 Git 工作流的演进脉络，帮助团队根据发布节奏和协作规模做出选择。
+          </p>
+          <a href="#" class="read-more">阅读全文</a>
+        </article>
+
+        <article class="blog-card">
+          <div class="meta">
+            <span class="date">📅 2025-04-20</span>
+            <span class="tag">前端</span>
+            <span class="tag">JavaScript</span>
+          </div>
+          <h2><a href="#">深入理解 JavaScript 事件循环与微任务</a></h2>
+          <p class="excerpt">
+            事件循环是 JavaScript 运行时的核心机制。本文通过 8 个由浅入深的代码示例，
+            帮你彻底搞懂宏任务、微任务、requestAnimationFrame 的执行顺序……
+          </p>
+          <a href="#" class="read-more">阅读全文</a>
+        </article>
+
+      </div>
+
+      <!-- 侧边栏 -->
+      <aside>
+        <div class="sidebar-section">
+          <h3>📌 精选标签</h3>
+          <ul>
+            <li>前端 (12)</li>
+            <li>后端 (8)</li>
+            <li>架构 (5)</li>
+            <li>Java (7)</li>
+            <li>CSS (6)</li>
+            <li>JavaScript (9)</li>
+            <li>DevOps (4)</li>
+          </ul>
+        </div>
+
+        <div class="sidebar-section">
+          <h3>📆 归档</h3>
+          <ul>
+            <li>2025年5月 (3)</li>
+            <li>2025年4月 (5)</li>
+            <li>2025年3月 (4)</li>
+            <li>2025年2月 (2)</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <!-- ========== Footer ========== -->
+  <footer class="site-footer">
+    <div class="social-links">
+      <a href="#">GitHub</a>
+      <a href="#">掘金</a>
+      <a href="#">知乎</a>
+      <a href="#">RSS</a>
+    </div>
+    <p class="copyright">
+      &copy; 2025 晨星小站 · 用 ❤️ 与 ☕ 驱动
+    </p>
+  </footer>
+
+</body>
+</html>
