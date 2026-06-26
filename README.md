@@ -52,7 +52,7 @@ flowchart LR
 
 ## 当前状态
 
-已完成 Agent 自动路由 MVP：
+### 第一期：Agent 自动路由 MVP
 
 - 新增 `AgentRouter`
 - 普通输入会自动选择 `ReAct`、`Plan-and-Execute` 或 `Multi-Agent`
@@ -60,11 +60,13 @@ flowchart LR
 - 已补充路由单元测试
 - 已记录阶段实现文档
 
-已完成 Plan 失败恢复增强第一版：
+### 第二期优化：Plan 失败恢复增强
 
 - 新增 `TaskFailureClassifier`
 - 区分工具临时失败、参数错误、依赖错误、校验失败
-- 分别选择重试、修正参数、重新规划或回滚
+- 根据分类结果分别选择重试、修正参数、重新规划或回滚
+- 参数错误和工具临时失败会给当前任务追加 `PLAN_RECOVERY` 提示，让模型有机会在下一轮修正
+- 依赖错误会触发 `Planner.replan(...)`，校验失败会尝试 Side-Git 回滚
 - 详细记录见 [docs/phase-24-plan-failure-recovery.md](docs/phase-24-plan-failure-recovery.md)
 
 详细设想见 [docs/agent-routing-vision.md](docs/agent-routing-vision.md)。
