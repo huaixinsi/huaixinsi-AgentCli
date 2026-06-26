@@ -109,9 +109,12 @@ flowchart TD
 
 当前阶段只实现路由入口，不把所有后续设想一次塞进去。
 
+当前已经开始接入：
+
+- Plan 失败分类和恢复策略
+
 暂不包含：
 
-- 失败分类
 - task-level checkpoint
 - diff 合并策略
 - 资源锁
@@ -125,7 +128,7 @@ flowchart TD
 后续可以按下面顺序推进：
 
 1. 让路由结果影响计划粒度和验证强度。
-2. 为 Plan-and-Execute 增加失败分类，例如环境失败、测试失败、权限失败、需求不明确。
+2. 继续细化 Plan-and-Execute 失败分类，例如环境失败、权限失败、需求不明确。
 3. 为每个任务节点加入 checkpoint，失败后可以回滚到节点级状态。
 4. 为 Multi-Agent 增加 planner、worker、reviewer 三类角色。
 5. 让 reviewer 对任务结果打分，低分时触发返工。
@@ -134,6 +137,8 @@ flowchart TD
 ## 相关文件
 
 - `src/main/java/com/paicli/agent/AgentRouter.java`
+- `src/main/java/com/paicli/plan/TaskFailureClassifier.java`
 - `src/main/java/com/paicli/cli/Main.java`
 - `src/test/java/com/paicli/agent/AgentRouterTest.java`
 - `docs/phase-23-agent-routing.md`
+- `docs/phase-24-plan-failure-recovery.md`

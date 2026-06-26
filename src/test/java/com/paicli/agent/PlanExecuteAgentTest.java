@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 
@@ -174,6 +175,57 @@ class PlanExecuteAgentTest {
                 "tool-call 前后的流式 content 不应被误标成任务结果: " + rendered);
     }
 
+    @Test
+    void shouldInjectRecoveryHintWhenToolParametersAreInvalid() throws Exception {
+        StubGLMClient llmClient = new StubGLMClient(List.of(
+                new LlmClient.ChatResponse(
+                        "assistant",
+                        "",
+                        List.of(new LlmClient.ToolCall(
+                                "call_bad_args",
+                                new LlmClient.ToolCall.Function("read_file", "{}")
+                        )),
+                        60,
+                        10
+                ),
+                new LlmClient.ChatResponse("assistant", "fixed parameters result", null, 80, 20)
+        ));
+
+        ToolRegistry toolRegistry = new ToolRegistry() {
+            @Override
+            public List<ToolExecutionResult> executeTools(List<ToolInvocation> invocations) {
+                ToolInvocation invocation = invocations.get(0);
+                return List.of(new ToolExecutionResult(
+                        invocation.id(),
+                        invocation.name(),
+                        invocation.argumentsJson(),
+                        "Tool execution failed: missing required parameter: path",
+                        0,
+                        false,
+                        List.of()
+                ));
+            }
+        };
+
+        PlanExecuteAgent agent = new PlanExecuteAgent(
+                llmClient,
+                toolRegistry,
+                new StubPlanner(llmClient),
+                null,
+                (goal, plan) -> PlanExecuteAgent.PlanReviewDecision.execute()
+        );
+
+        String result = agent.run("read file with invalid parameters");
+
+        assertTrue(result.contains("fixed parameters result"));
+        assertTrue(llmClient.seenMessages().stream()
+                        .flatMap(List::stream)
+                        .filter(message -> "user".equals(message.role()))
+                        .anyMatch(message -> message.content() != null
+                                && message.content().contains("FIX_PARAMETERS")),
+                "Plan execution should tell the model to fix bad tool parameters before retrying");
+    }
+
     private record StubResponse(LlmClient.ChatResponse response, boolean streamContent,
                                 java.util.function.Consumer<LlmClient.StreamListener> streamScript) {
         private static StubResponse plain(LlmClient.ChatResponse response) {
@@ -206,6 +258,7 @@ class PlanExecuteAgentTest {
 
     private static final class StubGLMClient extends GLMClient {
         private final Queue<StubResponse> responses;
+        private final List<List<Message>> seenMessages = new ArrayList<>();
 
         private StubGLMClient(List<ChatResponse> responses) {
             super("test-key");
@@ -228,6 +281,7 @@ class PlanExecuteAgentTest {
 
         @Override
         public ChatResponse chat(List<Message> messages, List<Tool> tools, StreamListener listener) throws IOException {
+            seenMessages.add(List.copyOf(messages));
             StubResponse stubResponse = responses.poll();
             if (stubResponse == null) {
                 throw new IOException("缺少预设响应");
@@ -238,6 +292,10 @@ class PlanExecuteAgentTest {
                 listener.onContentDelta(stubResponse.response().content());
             }
             return stubResponse.response();
+        }
+
+        private List<List<Message>> seenMessages() {
+            return seenMessages;
         }
     }
 }

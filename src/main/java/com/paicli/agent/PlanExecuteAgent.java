@@ -12,6 +12,7 @@ import com.paicli.prompt.PromptAssembler;
 import com.paicli.prompt.PromptContext;
 import com.paicli.prompt.PromptMode;
 import com.paicli.runtime.CancellationContext;
+import com.paicli.snapshot.RestoreResult;
 import com.paicli.skill.SkillContextBuffer;
 import com.paicli.skill.SkillIndexFormatter;
 import com.paicli.skill.SkillRegistry;
@@ -58,6 +59,17 @@ public class PlanExecuteAgent {
     private record TaskRunResult(String result, boolean streamedOutput) {
         static TaskRunResult of(String result, boolean streamedOutput) {
             return new TaskRunResult(result, streamedOutput);
+        }
+    }
+
+    private static final class ClassifiedTaskFailureException extends IOException {
+        private final TaskFailureClassifier.Decision decision;
+        private final String detail;
+
+        private ClassifiedTaskFailureException(TaskFailureClassifier.Decision decision, String detail) {
+            super(detail);
+            this.decision = decision;
+            this.detail = detail;
         }
     }
 
@@ -110,6 +122,7 @@ public class PlanExecuteAgent {
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
     private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
+    private final TaskFailureClassifier failureClassifier = new TaskFailureClassifier();
 
     public PlanExecuteAgent(LlmClient llmClient) {
         this(llmClient, (goal, plan) -> PlanReviewDecision.execute());
@@ -275,6 +288,8 @@ public class PlanExecuteAgent {
         plan.markStarted();
         StringBuilder finalResult = new StringBuilder();
         Map<String, Boolean> streamedTaskOutputs = new HashMap<>();
+        Map<String, Integer> recoveryAttempts = new HashMap<>();
+        Map<String, String> recoveryHints = new HashMap<>();
 
         while (true) {
             if (CancellationContext.isCancelled()) {
@@ -285,12 +300,13 @@ public class PlanExecuteAgent {
                 break;
             }
 
-            List<TaskExecutionResult> batchResults = executeTaskBatch(plan, executableTasks, streamState);
+            List<TaskExecutionResult> batchResults = executeTaskBatch(plan, executableTasks, streamState, recoveryHints);
             for (TaskExecutionResult batchResult : batchResults) {
                 Task task = batchResult.task();
 
                 if (!batchResult.failed()) {
                     task.markCompleted(batchResult.result());
+                    recoveryHints.remove(task.getId());
                     streamedTaskOutputs.put(task.getId(), batchResult.streamedOutput());
                     log.info("Task completed: {} status={} resultChars={}",
                             task.getId(), task.getStatus(), batchResult.result() == null ? 0 : batchResult.result().length());
@@ -304,6 +320,38 @@ public class PlanExecuteAgent {
                 }
 
                 Exception error = batchResult.error();
+                TaskFailureClassifier.Decision decision = classifyFailure(task, error);
+                String detail = failureDetail(error);
+                log.warn("Task failed: {} kind={} action={} error={}",
+                        task.getId(), decision.kind(), decision.action(), detail);
+                out.println(AnsiStyle.subtle("  recovery: " + decision.kind()
+                        + " -> " + decision.action() + " (" + decision.reason() + ")"));
+
+                if (decision.action() == TaskFailureClassifier.RecoveryAction.RETRY
+                        || decision.action() == TaskFailureClassifier.RecoveryAction.FIX_PARAMETERS) {
+                    int attempts = recoveryAttempts.getOrDefault(task.getId(), 0);
+                    if (attempts < MAX_TASK_RECOVERY_ATTEMPTS) {
+                        recoveryAttempts.put(task.getId(), attempts + 1);
+                        recoveryHints.put(task.getId(), buildRecoveryInstruction(task, decision, detail));
+                        task.setStatus(Task.TaskStatus.PENDING);
+                        task.setError(null);
+                        out.println(AnsiStyle.subtle("  retrying task " + task.getId()
+                                + " with recovery hint (" + (attempts + 1) + "/"
+                                + MAX_TASK_RECOVERY_ATTEMPTS + ")") + "\n");
+                        continue;
+                    }
+                }
+
+                if (decision.action() == TaskFailureClassifier.RecoveryAction.REPLAN) {
+                    out.println("馃攧 灏濊瘯閲嶆柊瑙勫垝...\n");
+                    ExecutionPlan replanned = planner.replan(plan, detail);
+                    return reviewAndExecutePlan(replanned, streamState).result();
+                }
+
+                if (decision.action() == TaskFailureClassifier.RecoveryAction.ROLLBACK) {
+                    task.markFailed(detail);
+                    return rollbackAfterFailure(task, decision, detail);
+                }
                 task.markFailed(error.getMessage());
                 log.warn("Task failed: {} error={}", task.getId(), error.getMessage());
                 out.println("❌ 失败 [" + task.getId() + "]: " + error.getMessage() + "\n");
@@ -357,7 +405,8 @@ public class PlanExecuteAgent {
     }
 
     private List<TaskExecutionResult> executeTaskBatch(ExecutionPlan plan, List<Task> executableTasks,
-                                                       StreamState streamState) {
+                                                       StreamState streamState,
+                                                       Map<String, String> recoveryHints) {
         if (executableTasks.size() == 1) {
             Task task = executableTasks.get(0);
             log.info("Executing single task: {} type={}", task.getId(), task.getType());
@@ -365,7 +414,8 @@ public class PlanExecuteAgent {
             task.markStarted();
 
             try {
-                return List.of(TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState, out)));
+                return List.of(TaskExecutionResult.success(task, executeTask(
+                        plan.getGoal(), plan, task, streamState, out, recoveryHints.get(task.getId()))));
             } catch (Exception e) {
                 return List.of(TaskExecutionResult.failure(task, e));
             }
@@ -393,7 +443,8 @@ public class PlanExecuteAgent {
                 PrintStream taskOut = new PrintStream(baos, true, StandardCharsets.UTF_8);
                 futures.add(executor.submit(() -> {
                     try {
-                        return TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState, taskOut));
+                        return TaskExecutionResult.success(task, executeTask(
+                                plan.getGoal(), plan, task, streamState, taskOut, recoveryHints.get(task.getId())));
                     } catch (Exception e) {
                         return TaskExecutionResult.failure(task, e);
                     }
@@ -432,12 +483,14 @@ public class PlanExecuteAgent {
     }
 
     private static final int MAX_TASK_ITERATIONS = 5;
+    private static final int MAX_TASK_RECOVERY_ATTEMPTS = 1;
 
     /**
      * 执行单个任务（支持多轮工具调用）
      */
     private TaskRunResult executeTask(String goal, ExecutionPlan plan, Task task,
-                                      StreamState streamState, PrintStream out) throws IOException {
+                                      StreamState streamState, PrintStream out,
+                                      String recoveryHint) throws IOException {
         String prompt = promptAssembler.assemble(PromptMode.PLAN, PromptContext.builder()
                 .variable("taskType", task.getType())
                 .variable("taskDescription", task.getDescription())
@@ -452,6 +505,9 @@ public class PlanExecuteAgent {
         String taskInput = buildTaskContext(goal, plan, task);
         if (!memoryContext.isEmpty()) {
             taskInput = taskInput + "\n\n" + memoryContext;
+        }
+        if (recoveryHint != null && !recoveryHint.isBlank()) {
+            taskInput = taskInput + "\n\n" + recoveryHint;
         }
         taskInput = prependSkillBodies(taskInput);
 
@@ -540,6 +596,14 @@ public class PlanExecuteAgent {
                 memoryManager.addToolResult(toolResult.name(), toolResult.result());
                 allResults.append(toolResult.result()).append("\n");
                 messages.add(LlmClient.Message.tool(toolResult.id(), toolResult.result()));
+                if (failureClassifier.isFailureResult(toolResult)) {
+                    TaskFailureClassifier.Decision decision = failureClassifier.classify(task, toolResult);
+                    if (decision.action() == TaskFailureClassifier.RecoveryAction.REPLAN
+                            || decision.action() == TaskFailureClassifier.RecoveryAction.ROLLBACK) {
+                        throw new ClassifiedTaskFailureException(decision, toolResult.result());
+                    }
+                    messages.add(LlmClient.Message.user(buildRecoveryInstruction(task, decision, toolResult.result())));
+                }
             }
             appendImageToolMessages(messages, toolResults);
         }
@@ -550,6 +614,60 @@ public class PlanExecuteAgent {
         }
         streamRenderer.finish();
         return TaskRunResult.of(fallbackResult, streamRenderer.hasStreamedOutput());
+    }
+
+    private TaskFailureClassifier.Decision classifyFailure(Task task, Exception error) {
+        if (error instanceof ClassifiedTaskFailureException classified) {
+            return classified.decision;
+        }
+        return failureClassifier.classify(task, error);
+    }
+
+    private String failureDetail(Exception error) {
+        if (error instanceof ClassifiedTaskFailureException classified) {
+            return classified.detail;
+        }
+        return error == null || error.getMessage() == null ? "unknown failure" : error.getMessage();
+    }
+
+    private String buildRecoveryInstruction(Task task, TaskFailureClassifier.Decision decision, String detail) {
+        return """
+                [PLAN_RECOVERY]
+                task_id=%s
+                failure_kind=%s
+                recovery_action=%s
+                reason=%s
+                failure_detail=%s
+
+                Apply the requested recovery action before continuing this task.
+                - RETRY: retry the failed operation only when it is safe and idempotent.
+                - FIX_PARAMETERS: correct the tool name or arguments, then call the tool again.
+                - REPLAN: stop this task and ask the planner for a new path.
+                - ROLLBACK: stop this task because verification failed after changes.
+                """.formatted(
+                task == null ? "" : task.getId(),
+                decision.kind(),
+                decision.action(),
+                decision.reason(),
+                detail == null ? "" : detail.replace("\r\n", "\n").replace('\r', '\n'));
+    }
+
+    private String rollbackAfterFailure(Task task, TaskFailureClassifier.Decision decision, String detail) {
+        out.println(AnsiStyle.subtle("  rollback requested for " + task.getId()
+                + " after " + decision.kind()));
+        try {
+            RestoreResult restoreResult = toolRegistry.getSnapshotService().restorePreTurn(1);
+            String restoreSummary = restoreResult == null ? "snapshot restore returned no result" : restoreResult.formatForCli();
+            return "Plan failed during verification; rollback action executed.\n"
+                    + "Task: " + task.getId() + "\n"
+                    + "Failure: " + detail + "\n"
+                    + restoreSummary;
+        } catch (Exception restoreError) {
+            return "Plan failed during verification; rollback action was selected but could not run.\n"
+                    + "Task: " + task.getId() + "\n"
+                    + "Failure: " + detail + "\n"
+                    + "Rollback error: " + restoreError.getMessage();
+        }
     }
 
     private String buildExternalContext() {

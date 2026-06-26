@@ -60,6 +60,13 @@ flowchart LR
 - 已补充路由单元测试
 - 已记录阶段实现文档
 
+已完成 Plan 失败恢复增强第一版：
+
+- 新增 `TaskFailureClassifier`
+- 区分工具临时失败、参数错误、依赖错误、校验失败
+- 分别选择重试、修正参数、重新规划或回滚
+- 详细记录见 [docs/phase-24-plan-failure-recovery.md](docs/phase-24-plan-failure-recovery.md)
+
 详细设想见 [docs/agent-routing-vision.md](docs/agent-routing-vision.md)。
 
 ## 后续演进
@@ -67,9 +74,8 @@ flowchart LR
 后续会围绕这个路由入口逐步补齐能力：
 
 1. 让路由结果参与更细粒度的任务规划。
-2. 为 Plan-and-Execute 增加失败分类和恢复策略。
-3. 为每个任务节点增加 checkpoint 和 diff 审查。
-4. 为 Multi-Agent 增加角色分工、评审者和评分机制。
-5. 将 MCP、RAG、长期记忆、命令安全分析逐步接入路由决策。
+2. 为每个任务节点增加 checkpoint 和 diff 审查。
+3. 为 Multi-Agent 增加角色分工、评审者和评分机制。
+4. 将 MCP、RAG、长期记忆、命令安全分析逐步接入路由决策。
 
 这个仓库会按“先建立入口，再逐步增强”的方式推进。
