@@ -59,4 +59,32 @@ class SideGitManagerTest {
         assertEquals(SnapshotPhase.POST_TURN, all.get(0).phase());
         assertEquals(SnapshotPhase.PRE_TURN, all.get(1).phase());
     }
+
+    @Test
+    void taskDiffFormatsMetadataAndTruncatesPatch() {
+        TaskDiff diff = new TaskDiff(
+                "task_1",
+                List.of("src/A.java", "src/B.java"),
+                4,
+                2,
+                "+".repeat(200)
+        );
+
+        String context = diff.formatForContext(120);
+
+        assertTrue(context.contains("task_id=task_1"));
+        assertTrue(context.contains("src/A.java"));
+        assertTrue(context.contains("additions=4"));
+        assertTrue(context.contains("diff truncated"));
+        assertTrue(context.length() <= 120);
+    }
+
+    @Test
+    void unavailableTaskCheckpointIsInactive() {
+        TaskCheckpoint checkpoint = TaskCheckpoint.unavailable("task_2");
+
+        assertEquals("task_2", checkpoint.taskId());
+        assertFalse(checkpoint.active());
+        assertEquals("", checkpoint.snapshotCommitId());
+    }
 }
