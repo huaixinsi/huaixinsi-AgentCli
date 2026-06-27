@@ -2,6 +2,8 @@
 
 > 当前状态：MVP 开发中。第 18 期目标是给 Agent 改文件加一层文件安全网：每个 turn 前后自动快照，用户可以恢复到某个 turn 开始前，而且不污染用户项目自己的 `.git` 历史。
 
+> 后续更新：第三期优化已在 Plan 内增加 task 级 checkpoint 与 diff。下文“不做 task 快照”是第 18 期 MVP 的历史边界，当前 Plan 行为以 `docs/phase-25-task-checkpoint-diff.md` 为准。
+
 ## 目标
 
 Agent 能放心改代码的前提不是“永远不犯错”，而是“改坏了能退回”。第 18 期要做到：

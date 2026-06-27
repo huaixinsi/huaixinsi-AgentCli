@@ -12,7 +12,7 @@
 
 - 项目名：`PaiCLI`
 - 定位：面向商业使用的 Java Agent CLI 产品，对标 Claude Code
-- 已交付 23 期（ReAct → Plan+DAG → Memory → RAG → Multi-Agent → HITL → 并行工具 → 多模型 → 联网 → MCP 核心 → MCP 高级 → 长上下文 → Chrome DevTools → CDP 会话复用 → Skill → TUI → LSP 诊断 → Side-Git 快照 → Prompt 分层 → Runtime API → 图片输入 → Agent 自动路由）
+- 已交付 25 期（ReAct → Plan+DAG → Memory → RAG → Multi-Agent → HITL → 并行工具 → 多模型 → 联网 → MCP 核心 → MCP 高级 → 长上下文 → Chrome DevTools → CDP 会话复用 → Skill → TUI → LSP 诊断 → Side-Git 快照 → Prompt 分层 → Runtime API → 图片输入 → Agent 自动路由 → Plan 失败恢复 → task checkpoint/diff）
 - 下一步：OAuth / sampling / recovery 作为后续 MCP 增强
 - Banner 版本：`v16.1.0`，Maven 产物：`paicli-1.0-SNAPSHOT.jar`（两者不一致是正常状态）
 
@@ -116,6 +116,9 @@ src/main/java/com/paicli/
 - `Enter` 执行 / `Ctrl+O` 展开 / `ESC` 取消 / `I` 补充重规划
 - 方向键不应被误判为 ESC
 - 涉及改动要连 raw mode 和回退路径一起看
+- task checkpoint 启用时，Plan 按 DAG execution order 串行执行就绪 task，避免共享工作区回滚覆盖兄弟 task
+- task 首次执行前创建 checkpoint；重试复用原 checkpoint；成功 diff 只进入后续依赖 task 上下文
+- 校验失败、replan 或重试耗尽前只恢复当前 task checkpoint，不自动恢复整个 turn
 
 ### 并行工具
 
@@ -184,6 +187,7 @@ src/main/java/com/paicli/
 | 代码搜索工具 | `mvn test -Dtest=ToolRegistryTest,ApprovalPolicyTest` |
 | 命令解析 | `mvn test -Dtest=CliCommandParserTest,PlanReviewInputParserTest,MainInputNormalizationTest` |
 | DAG/Plan | `mvn test -Dtest=ExecutionPlanTest` |
+| Plan task checkpoint | `mvn test -Dtest=SideGitManagerTest,TaskSyntaxValidatorTest,TaskFailureClassifierTest,PlanExecuteAgentTest` |
 | Multi-Agent | `mvn test -Dtest=AgentRoleTest,AgentMessageTest,AgentOrchestratorTest` |
 | TUI/终端 | `mvn test -Pphase16-smoke` |
 | RAG | `mvn test -Dtest=CodeChunkerTest,CodeAnalyzerTest,VectorStoreTest,CodeIndexTest` |

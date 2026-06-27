@@ -613,16 +613,16 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 联网     MCP核心    MCP高级     长上下文    Chrome     CDP        Skill      TUI       LSP
 能力     stdio+HTTP rsc/sample  200k-1M    DevTools   会话复用    系统       产品化     诊断注入
 
-第18期 ──► 第19期 ──► 第20期 ──► 第21期
-Git       Prompt    异步后台    图片
-快照回滚   分层架构    Runtime API  图片输入
+第18期 ──► 第19期 ──► 第20期 ──► 第21期 ──► 第22期 ──► 第23期 ──► 第24期 ──► 第25期
+Git       Prompt    异步后台    图片       JLine      Agent      Plan       Task
+快照回滚   分层架构    Runtime API  图片输入    交互升级    自动路由    失败恢复    快照与Diff
 ```
 
 ## 学习路径建议
 
 **入门**：按顺序 1 → 2 → 3 → 6 → 16，掌握核心即可
 **进阶**：1 → 2 → 3 → 4 → 7 → 8 → 9 → 10 → 12 → 13 → 15，深入技术细节
-**全套**：全部 21 期
+**全套**：全部 25 期
 **安全优先**：6（HITL）→ 17（LSP）→ 18（Git快照）→ 其他按需
 **架构优先**：19（Prompt重构）→ 20（Task Manager）→ 其他按需
 
@@ -651,4 +651,4 @@ Git       Prompt    异步后台    图片
 
 ---
 
-*已完成第 16 期 TUI 产品化（含 16.1 形态修正：默认切换为 inline 流式 TUI，Lanterna 全屏 TUI 通过 `PAICLI_RENDERER=lanterna` 保留）、第 17 期 LSP 诊断注入 MVP、第 18 期 Git Side-History 快照与回滚 MVP、第 19 期 Prompt 分层架构 MVP、第 20 期后台任务 + Runtime API MVP、第 21 期图片复制粘贴输入 MVP。*
+*已完成第 16 期 TUI 产品化（含 16.1 形态修正：默认切换为 inline 流式 TUI，Lanterna 全屏 TUI 通过 `PAICLI_RENDERER=lanterna` 保留）、第 17 期 LSP 诊断注入 MVP、第 18 期 Git Side-History 快照与回滚 MVP、第 19 期 Prompt 分层架构 MVP、第 20 期后台任务 + Runtime API MVP、第 21 期图片复制粘贴输入 MVP、第 22 期 JLine 交互升级、第 23 期 Agent 自动路由、第二期 Plan 失败恢复增强、第三期 Plan task checkpoint/diff MVP。*

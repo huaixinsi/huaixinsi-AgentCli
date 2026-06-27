@@ -69,6 +69,15 @@ flowchart LR
 - 依赖错误会触发 `Planner.replan(...)`，校验失败会尝试 Side-Git 回滚
 - 详细记录见 [docs/phase-24-plan-failure-recovery.md](docs/phase-24-plan-failure-recovery.md)
 
+### 第三期优化：任务级 Checkpoint 与 Diff
+
+- Plan task 改为串行事务执行，每个 task 首次执行前创建独立 Side-Git checkpoint
+- task 成功后生成文件 diff，并对变更的 Java 文件执行语法校验
+- 成功 diff 只注入后续依赖任务，上下文统一限制为 12,000 字符
+- task 最终失败或重新规划前只回滚当前 task，保留此前成功 task 的改动
+- Side-Git 初始化不会改写普通仓库或 linked worktree 的 `.git` 状态
+- 详细记录见 [docs/phase-25-task-checkpoint-diff.md](docs/phase-25-task-checkpoint-diff.md)
+
 详细设想见 [docs/agent-routing-vision.md](docs/agent-routing-vision.md)。
 
 ## 后续演进
@@ -76,8 +85,7 @@ flowchart LR
 后续会围绕这个路由入口逐步补齐能力：
 
 1. 让路由结果参与更细粒度的任务规划。
-2. 为每个任务节点增加 checkpoint 和 diff 审查。
-3. 为 Multi-Agent 增加角色分工、评审者和评分机制。
-4. 将 MCP、RAG、长期记忆、命令安全分析逐步接入路由决策。
+2. 为 Multi-Agent 增加角色分工、评审者和评分机制。
+3. 将 MCP、RAG、长期记忆、命令安全分析逐步接入路由决策。
 
 这个仓库会按“先建立入口，再逐步增强”的方式推进。
