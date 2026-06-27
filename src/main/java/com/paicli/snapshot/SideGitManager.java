@@ -246,11 +246,15 @@ public class SideGitManager {
     private Git openGit() throws IOException, GitAPIException {
         Files.createDirectories(gitDir.getParent());
         if (!Files.exists(gitDir.resolve("config"))) {
-            Git.init()
+            try (Repository repository = new FileRepositoryBuilder()
                     .setGitDir(gitDir.toFile())
-                    .setDirectory(projectRoot.toFile())
-                    .call()
-                    .close();
+                    .setBare()
+                    .build()) {
+                repository.create(true);
+                repository.getConfig().setBoolean("core", null, "bare", false);
+                repository.getConfig().setString("core", null, "worktree", projectRoot.toString());
+                repository.getConfig().save();
+            }
         }
         writeExcludeFile();
         Repository repository = new FileRepositoryBuilder()

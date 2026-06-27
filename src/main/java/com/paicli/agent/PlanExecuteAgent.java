@@ -13,6 +13,9 @@ import com.paicli.prompt.PromptContext;
 import com.paicli.prompt.PromptMode;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.snapshot.RestoreResult;
+import com.paicli.snapshot.SnapshotService;
+import com.paicli.snapshot.TaskCheckpoint;
+import com.paicli.snapshot.TaskDiff;
 import com.paicli.skill.SkillContextBuffer;
 import com.paicli.skill.SkillIndexFormatter;
 import com.paicli.skill.SkillRegistry;
@@ -25,14 +28,12 @@ import com.paicli.image.ImageReferenceParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -290,6 +291,11 @@ public class PlanExecuteAgent {
         Map<String, Boolean> streamedTaskOutputs = new HashMap<>();
         Map<String, Integer> recoveryAttempts = new HashMap<>();
         Map<String, String> recoveryHints = new HashMap<>();
+        Map<String, TaskCheckpoint> taskCheckpoints = new HashMap<>();
+        Map<String, TaskDiff> completedTaskDiffs = new LinkedHashMap<>();
+        SnapshotService snapshots = toolRegistry.getSnapshotService();
+        TaskSyntaxValidator syntaxValidator = new TaskSyntaxValidator();
+        Path projectRoot = Path.of(toolRegistry.getProjectPath()).toAbsolutePath().normalize();
 
         while (true) {
             if (CancellationContext.isCancelled()) {
@@ -300,9 +306,37 @@ public class PlanExecuteAgent {
                 break;
             }
 
-            List<TaskExecutionResult> batchResults = executeTaskBatch(plan, executableTasks, streamState, recoveryHints);
+            Task nextTask = executableTasks.get(0);
+            TaskCheckpoint checkpoint = taskCheckpoints.computeIfAbsent(
+                    nextTask.getId(),
+                    ignored -> snapshots.beginTask(nextTask.getId(), nextTask.getDescription())
+            );
+            List<TaskExecutionResult> batchResults = List.of(executeSingleTask(
+                    plan,
+                    nextTask,
+                    streamState,
+                    recoveryHints,
+                    completedTaskDiffs
+            ));
             for (TaskExecutionResult batchResult : batchResults) {
                 Task task = batchResult.task();
+
+                if (!batchResult.failed()) {
+                    TaskDiff taskDiff = captureTaskDiff(snapshots, checkpoint, task);
+                    TaskSyntaxValidator.ValidationResult validation = syntaxValidator.validate(projectRoot, taskDiff);
+                    if (!validation.valid()) {
+                        batchResult = TaskExecutionResult.failure(
+                                task,
+                                new IOException("validation failed:\n" + validation.summary())
+                        );
+                    } else {
+                        snapshots.completeTask(checkpoint, task.getDescription());
+                        if (checkpoint.active()) {
+                            completedTaskDiffs.put(task.getId(), taskDiff);
+                        }
+                        taskCheckpoints.remove(task.getId());
+                    }
+                }
 
                 if (!batchResult.failed()) {
                     task.markCompleted(batchResult.result());
@@ -343,6 +377,8 @@ public class PlanExecuteAgent {
                 }
 
                 if (decision.action() == TaskFailureClassifier.RecoveryAction.REPLAN) {
+                    RestoreResult restoreResult = restoreFailedTask(task, taskCheckpoints);
+                    logTaskRestore(task, restoreResult);
                     out.println("馃攧 灏濊瘯閲嶆柊瑙勫垝...\n");
                     ExecutionPlan replanned = planner.replan(plan, detail);
                     return reviewAndExecutePlan(replanned, streamState).result();
@@ -350,8 +386,11 @@ public class PlanExecuteAgent {
 
                 if (decision.action() == TaskFailureClassifier.RecoveryAction.ROLLBACK) {
                     task.markFailed(detail);
-                    return rollbackAfterFailure(task, decision, detail);
+                    RestoreResult restoreResult = restoreFailedTask(task, taskCheckpoints);
+                    return rollbackAfterFailure(task, decision, detail, restoreResult);
                 }
+                RestoreResult restoreResult = restoreFailedTask(task, taskCheckpoints);
+                logTaskRestore(task, restoreResult);
                 task.markFailed(error.getMessage());
                 log.warn("Task failed: {} error={}", task.getId(), error.getMessage());
                 out.println("❌ 失败 [" + task.getId() + "]: " + error.getMessage() + "\n");
@@ -404,93 +443,40 @@ public class PlanExecuteAgent {
                 .toList();
     }
 
-    private List<TaskExecutionResult> executeTaskBatch(ExecutionPlan plan, List<Task> executableTasks,
-                                                       StreamState streamState,
-                                                       Map<String, String> recoveryHints) {
-        if (executableTasks.size() == 1) {
-            Task task = executableTasks.get(0);
-            log.info("Executing single task: {} type={}", task.getId(), task.getType());
-            out.println("▶️ 执行任务 [" + task.getId() + "]: " + task.getDescription());
-            task.markStarted();
-
-            try {
-                return List.of(TaskExecutionResult.success(task, executeTask(
-                        plan.getGoal(), plan, task, streamState, out, recoveryHints.get(task.getId()))));
-            } catch (Exception e) {
-                return List.of(TaskExecutionResult.failure(task, e));
-            }
-        }
-
-        String parallelTaskIds = executableTasks.stream()
-                .map(Task::getId)
-                .collect(Collectors.joining(", "));
-        log.info("Executing parallel batch: {}", parallelTaskIds);
-        out.println("⚡ 本轮并行执行 " + executableTasks.size() + " 个任务: " + parallelTaskIds);
-
-        ExecutorService executor = Executors.newFixedThreadPool(Math.min(executableTasks.size(), 4), r -> {
-            Thread t = new Thread(r, "paicli-plan-executor");
-            t.setDaemon(true);
-            return t;
-        });
+    private TaskExecutionResult executeSingleTask(ExecutionPlan plan,
+                                                  Task task,
+                                                  StreamState streamState,
+                                                  Map<String, String> recoveryHints,
+                                                  Map<String, TaskDiff> completedTaskDiffs) {
+        log.info("Executing task serially: {} type={}", task.getId(), task.getType());
+        out.println("▶️ 执行任务 [" + task.getId() + "]: " + task.getDescription());
+        task.markStarted();
         try {
-            Map<String, ByteArrayOutputStream> buffers = new LinkedHashMap<>();
-            List<Future<TaskExecutionResult>> futures = new ArrayList<>();
-            for (Task task : executableTasks) {
-                out.println("▶️ 并行任务 [" + task.getId() + "]: " + task.getDescription());
-                task.markStarted();
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                buffers.put(task.getId(), baos);
-                PrintStream taskOut = new PrintStream(baos, true, StandardCharsets.UTF_8);
-                futures.add(executor.submit(() -> {
-                    try {
-                        return TaskExecutionResult.success(task, executeTask(
-                                plan.getGoal(), plan, task, streamState, taskOut, recoveryHints.get(task.getId())));
-                    } catch (Exception e) {
-                        return TaskExecutionResult.failure(task, e);
-                    }
-                }));
-            }
-
-            List<TaskExecutionResult> results = new ArrayList<>();
-            for (Future<TaskExecutionResult> future : futures) {
-                try {
-                    results.add(future.get());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    results.add(TaskExecutionResult.failure(executableTasks.get(results.size()), e));
-                } catch (ExecutionException e) {
-                    Throwable cause = e.getCause();
-                    Exception error = cause instanceof Exception exception
-                            ? exception
-                            : new RuntimeException(cause);
-                    results.add(TaskExecutionResult.failure(executableTasks.get(results.size()), error));
-                }
-            }
-
-            // 按任务顺序 flush 各缓冲区到 stdout，避免并行输出交错
-            for (Task task : executableTasks) {
-                ByteArrayOutputStream buf = buffers.get(task.getId());
-                if (buf != null && buf.size() > 0) {
-                    out.print(buf.toString(StandardCharsets.UTF_8));
-                    out.flush();
-                }
-            }
-
-            return results;
-        } finally {
-            executor.shutdownNow();
+            return TaskExecutionResult.success(task, executeTask(
+                    plan.getGoal(),
+                    plan,
+                    task,
+                    streamState,
+                    out,
+                    recoveryHints.get(task.getId()),
+                    completedTaskDiffs
+            ));
+        } catch (Exception e) {
+            return TaskExecutionResult.failure(task, e);
         }
     }
 
     private static final int MAX_TASK_ITERATIONS = 5;
     private static final int MAX_TASK_RECOVERY_ATTEMPTS = 1;
+    private static final int MAX_TASK_DIFF_CONTEXT_CHARS = 12_000;
 
     /**
      * 执行单个任务（支持多轮工具调用）
      */
     private TaskRunResult executeTask(String goal, ExecutionPlan plan, Task task,
                                       StreamState streamState, PrintStream out,
-                                      String recoveryHint) throws IOException {
+                                      String recoveryHint,
+                                      Map<String, TaskDiff> completedTaskDiffs) throws IOException {
         String prompt = promptAssembler.assemble(PromptMode.PLAN, PromptContext.builder()
                 .variable("taskType", task.getType())
                 .variable("taskDescription", task.getDescription())
@@ -502,7 +488,7 @@ public class PlanExecuteAgent {
         String memoryContext = memoryManager.buildContextForQuery(
                 task.getDescription(),
                 memoryManager.getContextProfile().memoryContextTokens());
-        String taskInput = buildTaskContext(goal, plan, task);
+        String taskInput = buildTaskContext(goal, plan, task, completedTaskDiffs);
         if (!memoryContext.isEmpty()) {
             taskInput = taskInput + "\n\n" + memoryContext;
         }
@@ -616,6 +602,19 @@ public class PlanExecuteAgent {
         return TaskRunResult.of(fallbackResult, streamRenderer.hasStreamedOutput());
     }
 
+    private TaskDiff captureTaskDiff(SnapshotService snapshots,
+                                     TaskCheckpoint checkpoint,
+                                     Task task) {
+        try {
+            return snapshots.diffTask(checkpoint);
+        } catch (Exception e) {
+            log.warn("Task diff unavailable: taskId={}", task.getId(), e);
+            out.println(AnsiStyle.subtle("  task diff unavailable [" + task.getId()
+                    + "]: " + e.getMessage()));
+            return TaskDiff.empty(task.getId());
+        }
+    }
+
     private TaskFailureClassifier.Decision classifyFailure(Task task, Exception error) {
         if (error instanceof ClassifiedTaskFailureException classified) {
             return classified.decision;
@@ -652,22 +651,41 @@ public class PlanExecuteAgent {
                 detail == null ? "" : detail.replace("\r\n", "\n").replace('\r', '\n'));
     }
 
-    private String rollbackAfterFailure(Task task, TaskFailureClassifier.Decision decision, String detail) {
+    private RestoreResult restoreFailedTask(Task task,
+                                            Map<String, TaskCheckpoint> taskCheckpoints) {
+        TaskCheckpoint checkpoint = taskCheckpoints.remove(task.getId());
+        if (checkpoint == null || !checkpoint.active()) {
+            return RestoreResult.failure("task checkpoint unavailable");
+        }
+        try {
+            return toolRegistry.getSnapshotService().restoreTask(checkpoint);
+        } catch (Exception e) {
+            return RestoreResult.failure("task rollback failed: " + e.getMessage());
+        }
+    }
+
+    private void logTaskRestore(Task task, RestoreResult restoreResult) {
+        String summary = restoreResult == null
+                ? "task rollback returned no result"
+                : restoreResult.formatForCli();
+        log.info("Task rollback: taskId={} success={} summary={}",
+                task.getId(), restoreResult != null && restoreResult.success(), summary);
+        out.println(AnsiStyle.subtle("  task rollback [" + task.getId() + "]: " + summary));
+    }
+
+    private String rollbackAfterFailure(Task task,
+                                        TaskFailureClassifier.Decision decision,
+                                        String detail,
+                                        RestoreResult restoreResult) {
         out.println(AnsiStyle.subtle("  rollback requested for " + task.getId()
                 + " after " + decision.kind()));
-        try {
-            RestoreResult restoreResult = toolRegistry.getSnapshotService().restorePreTurn(1);
-            String restoreSummary = restoreResult == null ? "snapshot restore returned no result" : restoreResult.formatForCli();
-            return "Plan failed during verification; rollback action executed.\n"
-                    + "Task: " + task.getId() + "\n"
-                    + "Failure: " + detail + "\n"
-                    + restoreSummary;
-        } catch (Exception restoreError) {
-            return "Plan failed during verification; rollback action was selected but could not run.\n"
-                    + "Task: " + task.getId() + "\n"
-                    + "Failure: " + detail + "\n"
-                    + "Rollback error: " + restoreError.getMessage();
-        }
+        String restoreSummary = restoreResult == null
+                ? "task rollback returned no result"
+                : restoreResult.formatForCli();
+        return "Plan failed during verification; task rollback executed.\n"
+                + "Task: " + task.getId() + "\n"
+                + "Failure: " + detail + "\n"
+                + restoreSummary;
     }
 
     private String buildExternalContext() {
@@ -947,7 +965,10 @@ public class PlanExecuteAgent {
         }
     }
 
-    private String buildTaskContext(String goal, ExecutionPlan plan, Task task) {
+    private String buildTaskContext(String goal,
+                                    ExecutionPlan plan,
+                                    Task task,
+                                    Map<String, TaskDiff> completedTaskDiffs) {
         StringBuilder context = new StringBuilder();
         context.append("总目标：").append(goal).append("\n");
         context.append("当前任务：").append(task.getDescription()).append("\n");
@@ -971,8 +992,50 @@ public class PlanExecuteAgent {
             }
         }
 
+        appendDependencyDiffs(context, plan, task, completedTaskDiffs);
         context.append("请执行此任务。如果是ANALYSIS或VERIFICATION类型，请基于以上上下文直接给出结果。");
         return context.toString();
+    }
+
+    private void appendDependencyDiffs(StringBuilder context,
+                                       ExecutionPlan plan,
+                                       Task task,
+                                       Map<String, TaskDiff> taskDiffs) {
+        if (taskDiffs == null || taskDiffs.isEmpty()) {
+            return;
+        }
+        LinkedHashSet<String> dependencyIds = new LinkedHashSet<>();
+        collectDependencyIds(plan, task, dependencyIds);
+        int remaining = MAX_TASK_DIFF_CONTEXT_CHARS;
+        for (String dependencyId : dependencyIds) {
+            TaskDiff diff = taskDiffs.get(dependencyId);
+            if (diff == null || remaining <= 0) {
+                continue;
+            }
+            String prefix = "\n\n[TASK_DIFF " + dependencyId + "]\n";
+            if (prefix.length() >= remaining) {
+                break;
+            }
+            String formatted = diff.formatForContext(remaining - prefix.length());
+            context.append(prefix).append(formatted);
+            remaining -= prefix.length() + formatted.length();
+        }
+        if (!dependencyIds.isEmpty()) {
+            context.append("\n\n");
+        }
+    }
+
+    private void collectDependencyIds(ExecutionPlan plan,
+                                      Task task,
+                                      LinkedHashSet<String> dependencyIds) {
+        for (String dependencyId : task.getDependencies()) {
+            Task dependency = plan.getTask(dependencyId);
+            if (dependency == null || dependencyIds.contains(dependencyId)) {
+                continue;
+            }
+            collectDependencyIds(plan, dependency, dependencyIds);
+            dependencyIds.add(dependencyId);
+        }
     }
 
     private String buildFinalResult(ExecutionPlan plan, Map<String, Boolean> streamedTaskOutputs) {

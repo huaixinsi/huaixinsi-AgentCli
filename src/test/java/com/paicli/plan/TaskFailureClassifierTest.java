@@ -58,4 +58,16 @@ class TaskFailureClassifierTest {
         assertEquals(TaskFailureClassifier.FailureKind.VALIDATION_FAILURE, decision.kind());
         assertEquals(TaskFailureClassifier.RecoveryAction.ROLLBACK, decision.action());
     }
+
+    @Test
+    void prioritizesExplicitValidationFailureOverEofKeyword() {
+        Task task = new Task("task_4", "write Java source", Task.TaskType.FILE_WRITE);
+
+        TaskFailureClassifier.Decision decision = classifier.classify(
+                task,
+                new IOException("validation failed: Parse error. Found <EOF>"));
+
+        assertEquals(TaskFailureClassifier.FailureKind.VALIDATION_FAILURE, decision.kind());
+        assertEquals(TaskFailureClassifier.RecoveryAction.ROLLBACK, decision.action());
+    }
 }

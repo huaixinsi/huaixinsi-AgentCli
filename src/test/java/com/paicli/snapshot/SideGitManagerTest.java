@@ -153,4 +153,20 @@ class SideGitManagerTest {
             assertTrue(service.diffTask(checkpoint).changedFiles().isEmpty());
         }
     }
+
+    @Test
+    void doesNotRewriteLinkedWorktreeGitPointer() throws Exception {
+        Path project = tempDir.resolve("linked-worktree-project");
+        Path snapshots = tempDir.resolve("linked-worktree-snapshots");
+        Files.createDirectories(project);
+        String gitPointer = "gitdir: C:/repo/.git/worktrees/feature\n";
+        Files.writeString(project.resolve(".git"), gitPointer);
+        Files.writeString(project.resolve("tracked.txt"), "content");
+        SideGitManager manager = new SideGitManager(project,
+                new SnapshotConfig(true, snapshots, 50, List.of(".git", "target")));
+
+        manager.preTaskSnapshot("task_1", "before");
+
+        assertEquals(gitPointer, Files.readString(project.resolve(".git")));
+    }
 }

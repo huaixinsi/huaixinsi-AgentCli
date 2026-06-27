@@ -61,6 +61,14 @@ public class TaskFailureClassifier {
     private Decision classify(Task task, String rawMessage, boolean timedOut) {
         String message = normalize(rawMessage);
 
+        if (containsAny(message,
+                "test failed", "tests failed", "assertion", "verification failed",
+                "validation failed", "check failed", "\u6d4b\u8bd5\u5931\u8d25",
+                "\u6821\u9a8c\u5931\u8d25", "\u9a8c\u8bc1\u5931\u8d25", "\u65ad\u8a00")) {
+            return new Decision(FailureKind.VALIDATION_FAILURE, RecoveryAction.ROLLBACK,
+                    "verification failed after plan changes");
+        }
+
         if (timedOut || containsAny(message,
                 "timeout", "timed out", "temporarily", "temporary", "service unavailable",
                 "connection reset", "connection refused", "eof", "http 429", "http 503",
@@ -86,10 +94,7 @@ public class TaskFailureClassifier {
                     "task dependency or prerequisite is missing");
         }
 
-        if (isVerificationTask(task) || containsAny(message,
-                "test failed", "tests failed", "assertion", "verification failed",
-                "validation failed", "check failed", "\u6d4b\u8bd5\u5931\u8d25",
-                "\u6821\u9a8c\u5931\u8d25", "\u9a8c\u8bc1\u5931\u8d25", "\u65ad\u8a00")) {
+        if (isVerificationTask(task)) {
             return new Decision(FailureKind.VALIDATION_FAILURE, RecoveryAction.ROLLBACK,
                     "verification failed after plan changes");
         }
