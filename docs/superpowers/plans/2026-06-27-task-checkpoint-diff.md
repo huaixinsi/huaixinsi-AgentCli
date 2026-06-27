@@ -1,48 +1,48 @@
-# Plan Task Checkpoint and Diff Implementation Plan
+# Plan 任务级 Checkpoint 与 Diff 实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **供执行 Agent 使用：** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，逐项执行本计划。所有步骤使用复选框（`- [ ]`）跟踪状态。
 
-**Goal:** Add isolated Side-Git checkpoints, unified diffs, Java syntax validation, dependency-scoped diff context, and precise rollback to every serially executed Plan task.
+**目标：** 为串行执行的每个 Plan task 增加隔离的 Side-Git checkpoint、统一 diff、Java 语法校验、依赖范围 diff 上下文和精准回滚。
 
-**Architecture:** Extend the existing Side-Git repository with task snapshot phases and commit-to-worktree diff/restore operations. `PlanExecuteAgent` will execute one ready task at a time, reuse one checkpoint across retries, validate successful task diffs, retain valid diffs for dependency context, and restore only the active task checkpoint before terminal recovery.
+**架构：** 在现有 Side-Git 仓库上增加 task 快照阶段，以及 commit 到工作区的 diff/恢复操作。`PlanExecuteAgent` 每次只执行一个就绪 task，在重试期间复用同一 checkpoint，校验成功 task 的 diff，将有效 diff 保留为依赖上下文，并在终止恢复前只恢复当前 task 的 checkpoint。
 
-**Tech Stack:** Java 17, Maven, JUnit 5, JGit, JavaParser
+**技术栈：** Java 17、Maven、JUnit 5、JGit、JavaParser
 
 ---
 
-## File Map
+## 文件规划
 
-**Create**
+**新增文件**
 
-- `src/main/java/com/paicli/snapshot/TaskCheckpoint.java`: immutable task baseline descriptor, including unavailable-state support.
-- `src/main/java/com/paicli/snapshot/TaskDiff.java`: changed-file list, line statistics, unified patch, and bounded LLM formatting.
-- `src/main/java/com/paicli/plan/TaskSyntaxValidator.java`: JavaParser validation for changed Java files.
-- `src/test/java/com/paicli/plan/TaskSyntaxValidatorTest.java`: syntax validation unit tests.
-- `docs/phase-25-task-checkpoint-diff.md`: user-facing third-phase behavior and verification record.
+- `src/main/java/com/paicli/snapshot/TaskCheckpoint.java`：不可变的 task 基线描述对象，支持明确表示 checkpoint 不可用。
+- `src/main/java/com/paicli/snapshot/TaskDiff.java`：保存变更文件、行数统计、统一补丁和受限长度的 LLM 格式化结果。
+- `src/main/java/com/paicli/plan/TaskSyntaxValidator.java`：使用 JavaParser 校验变更的 Java 文件。
+- `src/test/java/com/paicli/plan/TaskSyntaxValidatorTest.java`：语法校验单元测试。
+- `docs/phase-25-task-checkpoint-diff.md`：面向使用者的第三期行为和验证记录。
 
-**Modify**
+**修改文件**
 
-- `src/main/java/com/paicli/snapshot/SnapshotPhase.java`: add `PRE_TASK` and `POST_TASK`.
-- `src/main/java/com/paicli/snapshot/SideGitManager.java`: task snapshots, commit-to-worktree diff, and exact commit restore.
-- `src/main/java/com/paicli/snapshot/SnapshotService.java`: synchronous task checkpoint facade with non-blocking degradation.
-- `src/test/java/com/paicli/snapshot/SideGitManagerTest.java`: diff, phase, and precise restore coverage.
-- `src/main/java/com/paicli/agent/PlanExecuteAgent.java`: serial task transaction lifecycle and dependency diff context.
-- `src/test/java/com/paicli/agent/PlanExecuteAgentTest.java`: Plan checkpoint integration and rollback coverage.
-- `README.md`: add third-phase status.
-- `AGENTS.md`: update delivered phase, Plan execution rules, and verification path.
-- `docs/phase-24-plan-failure-recovery.md`: replace turn rollback with task rollback.
-- `docs/phase-18-side-history-snapshot.md`: record that phase 25 supersedes the earlier no-task-snapshot boundary.
+- `src/main/java/com/paicli/snapshot/SnapshotPhase.java`：增加 `PRE_TASK` 和 `POST_TASK`。
+- `src/main/java/com/paicli/snapshot/SideGitManager.java`：增加 task 快照、commit 到工作区的 diff，以及指定 commit 精准恢复。
+- `src/main/java/com/paicli/snapshot/SnapshotService.java`：提供同步 task checkpoint 门面和非阻断降级。
+- `src/test/java/com/paicli/snapshot/SideGitManagerTest.java`：覆盖 diff、快照阶段和精准恢复。
+- `src/main/java/com/paicli/agent/PlanExecuteAgent.java`：接入串行 task 事务生命周期和依赖 diff 上下文。
+- `src/test/java/com/paicli/agent/PlanExecuteAgentTest.java`：覆盖 Plan checkpoint 集成和回滚。
+- `README.md`：增加第三期状态。
+- `AGENTS.md`：更新已交付阶段、Plan 执行规则和验证路径。
+- `docs/phase-24-plan-failure-recovery.md`：将 turn 级回滚更新为 task 级回滚。
+- `docs/phase-18-side-history-snapshot.md`：记录第三期已覆盖早期“不做 task 快照”的边界。
 
-### Task 1: Task Snapshot Models and Bounded Context
+### 任务 1：Task 快照模型与受限上下文
 
-**Files:**
-- Create: `src/main/java/com/paicli/snapshot/TaskCheckpoint.java`
-- Create: `src/main/java/com/paicli/snapshot/TaskDiff.java`
-- Test: `src/test/java/com/paicli/snapshot/SideGitManagerTest.java`
+**文件：**
+- 新增：`src/main/java/com/paicli/snapshot/TaskCheckpoint.java`
+- 新增：`src/main/java/com/paicli/snapshot/TaskDiff.java`
+- 测试：`src/test/java/com/paicli/snapshot/SideGitManagerTest.java`
 
-- [ ] **Step 1: Write failing model tests**
+- [ ] **步骤 1：编写失败的模型测试**
 
-Add tests proving unavailable checkpoints are explicit and diff formatting always preserves metadata while truncating the patch:
+增加测试，证明不可用 checkpoint 会被明确表示，同时 diff 格式化在截断补丁时仍保留元数据：
 
 ```java
 @Test
@@ -75,19 +75,19 @@ void unavailableTaskCheckpointIsInactive() {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [ ] **步骤 2：运行针对性测试并确认 RED**
 
-Run:
+运行：
 
 ```bash
 mvn test -Dtest=SideGitManagerTest -DskipTests=false
 ```
 
-Expected: compilation fails because `TaskCheckpoint` and `TaskDiff` do not exist.
+预期：由于 `TaskCheckpoint` 和 `TaskDiff` 尚不存在，编译失败。
 
-- [ ] **Step 3: Add the minimal immutable models**
+- [ ] **步骤 3：增加最小不可变模型**
 
-Create `TaskCheckpoint`:
+创建 `TaskCheckpoint`：
 
 ```java
 package com.paicli.snapshot;
@@ -112,7 +112,7 @@ public record TaskCheckpoint(
 }
 ```
 
-Create `TaskDiff`:
+创建 `TaskDiff`：
 
 ```java
 package com.paicli.snapshot;
@@ -156,34 +156,34 @@ public record TaskDiff(
 }
 ```
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [ ] **步骤 4：运行针对性测试并确认 GREEN**
 
-Run:
+运行：
 
 ```bash
 mvn test -Dtest=SideGitManagerTest -DskipTests=false
 ```
 
-Expected: all `SideGitManagerTest` tests pass.
+预期：`SideGitManagerTest` 全部通过。
 
-- [ ] **Step 5: Commit the models**
+- [ ] **步骤 5：提交模型**
 
 ```bash
 git add src/main/java/com/paicli/snapshot/TaskCheckpoint.java src/main/java/com/paicli/snapshot/TaskDiff.java src/test/java/com/paicli/snapshot/SideGitManagerTest.java
 git commit -m "add task checkpoint models"
 ```
 
-### Task 2: Side-Git Task Diff and Exact Restore
+### 任务 2：Side-Git Task Diff 与指定快照恢复
 
-**Files:**
-- Modify: `src/main/java/com/paicli/snapshot/SnapshotPhase.java`
-- Modify: `src/main/java/com/paicli/snapshot/SideGitManager.java`
-- Modify: `src/main/java/com/paicli/snapshot/SnapshotService.java`
-- Test: `src/test/java/com/paicli/snapshot/SideGitManagerTest.java`
+**文件：**
+- 修改：`src/main/java/com/paicli/snapshot/SnapshotPhase.java`
+- 修改：`src/main/java/com/paicli/snapshot/SideGitManager.java`
+- 修改：`src/main/java/com/paicli/snapshot/SnapshotService.java`
+- 测试：`src/test/java/com/paicli/snapshot/SideGitManagerTest.java`
 
-- [ ] **Step 1: Write failing Side-Git transaction tests**
+- [ ] **步骤 1：编写失败的 Side-Git 事务测试**
 
-Add one test that modifies, creates, and deletes files, then checks diff metadata and exact restore:
+增加测试，在修改、新增和删除文件后检查 diff 元数据与指定快照恢复：
 
 ```java
 @Test
@@ -252,26 +252,26 @@ void disabledSnapshotServiceReturnsInactiveTaskCheckpoint() throws Exception {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [ ] **步骤 2：运行针对性测试并确认 RED**
 
-Run:
+运行：
 
 ```bash
 mvn test -Dtest=SideGitManagerTest -DskipTests=false
 ```
 
-Expected: compilation fails because task snapshot, diff, and exact restore methods are missing.
+预期：由于 task 快照、diff 和指定快照恢复方法尚不存在，编译失败。
 
-- [ ] **Step 3: Add task phases and Side-Git operations**
+- [ ] **步骤 3：增加 task 快照阶段和 Side-Git 操作**
 
-Add enum constants:
+增加枚举值：
 
 ```java
 PRE_TASK("pre-task"),
 POST_TASK("post-task"),
 ```
 
-Add synchronized task snapshot methods that delegate to `createSnapshot(...)`:
+增加同步 task 快照方法，并委托给 `createSnapshot(...)`：
 
 ```java
 public synchronized TurnSnapshot preTaskSnapshot(String taskId, String summary)
@@ -285,7 +285,7 @@ public synchronized TurnSnapshot postTaskSnapshot(String taskId, String summary)
 }
 ```
 
-Implement `diffFromSnapshot(...)` with `CanonicalTreeParser`, `FileTreeIterator`, and `DiffFormatter`. Sort changed paths, format each `DiffEntry`, and count patch lines whose prefix is `+` or `-` while excluding `+++` and `---` headers:
+使用 `CanonicalTreeParser`、`FileTreeIterator` 和 `DiffFormatter` 实现 `diffFromSnapshot(...)`。对变更路径排序，格式化每个 `DiffEntry`，并统计以 `+` 或 `-` 开头的补丁行，同时排除 `+++` 和 `---` 文件头：
 
 ```java
 public synchronized TaskDiff diffFromSnapshot(String taskId, String commitId)
@@ -320,7 +320,7 @@ public synchronized TaskDiff diffFromSnapshot(String taskId, String commitId)
 }
 ```
 
-Add the helpers used by `diffFromSnapshot(...)`:
+增加 `diffFromSnapshot(...)` 使用的辅助方法：
 
 ```java
 private static String changedPath(DiffEntry entry) {
@@ -340,11 +340,11 @@ private static int countPatchLines(String patch, String prefix, String headerPre
 }
 ```
 
-Refactor the current restore body into `restoreSnapshot(commitId, taskId)`. It must create a `pre-restore` snapshot, compare its tree with the target tree, delete files absent from the target, and write target blobs. Make `restorePreTurn(...)` locate the pre-turn commit and delegate to this method.
+将现有恢复逻辑提取到 `restoreSnapshot(commitId, taskId)`。该方法必须先创建 `pre-restore` 快照，对比当前树和目标树，删除目标树中不存在的文件并写回目标 blob。`restorePreTurn(...)` 只负责定位 pre-turn commit，再委托给此方法。
 
-- [ ] **Step 4: Add the non-blocking SnapshotService facade**
+- [ ] **步骤 4：增加非阻断的 SnapshotService 门面**
 
-Add synchronous methods:
+增加同步方法：
 
 ```java
 public TaskCheckpoint beginTask(String taskId, String summary) {
@@ -386,30 +386,30 @@ public RestoreResult restoreTask(TaskCheckpoint checkpoint) throws Exception {
 }
 ```
 
-- [ ] **Step 5: Run snapshot tests and verify GREEN**
+- [ ] **步骤 5：运行快照测试并确认 GREEN**
 
-Run:
+运行：
 
 ```bash
 mvn test -Dtest=SideGitManagerTest -DskipTests=false
 ```
 
-Expected: task diff, task phase, existing turn restore, and async service tests all pass.
+预期：task diff、task phase、原有 turn 恢复和异步服务测试全部通过。
 
-- [ ] **Step 6: Commit Side-Git task operations**
+- [ ] **步骤 6：提交 Side-Git task 操作**
 
 ```bash
 git add src/main/java/com/paicli/snapshot src/test/java/com/paicli/snapshot/SideGitManagerTest.java
 git commit -m "add side git task transactions"
 ```
 
-### Task 3: Java Task Syntax Validation
+### 任务 3：Java Task 语法校验
 
-**Files:**
-- Create: `src/main/java/com/paicli/plan/TaskSyntaxValidator.java`
-- Create: `src/test/java/com/paicli/plan/TaskSyntaxValidatorTest.java`
+**文件：**
+- 新增：`src/main/java/com/paicli/plan/TaskSyntaxValidator.java`
+- 新增：`src/test/java/com/paicli/plan/TaskSyntaxValidatorTest.java`
 
-- [ ] **Step 1: Write failing syntax validator tests**
+- [ ] **步骤 1：编写失败的语法校验测试**
 
 ```java
 @Test
@@ -451,17 +451,17 @@ void ignoresDeletedAndNonJavaFiles(@TempDir Path root) {
 }
 ```
 
-- [ ] **Step 2: Run the new test and verify RED**
+- [ ] **步骤 2：运行新测试并确认 RED**
 
-Run:
+运行：
 
 ```bash
 mvn test -Dtest=TaskSyntaxValidatorTest -DskipTests=false
 ```
 
-Expected: compilation fails because `TaskSyntaxValidator` does not exist.
+预期：由于 `TaskSyntaxValidator` 尚不存在，编译失败。
 
-- [ ] **Step 3: Implement JavaParser validation**
+- [ ] **步骤 3：实现 JavaParser 校验**
 
 ```java
 package com.paicli.plan;
@@ -519,34 +519,34 @@ public class TaskSyntaxValidator {
 }
 ```
 
-- [ ] **Step 4: Run validator tests and verify GREEN**
+- [ ] **步骤 4：运行校验器测试并确认 GREEN**
 
-Run:
+运行：
 
 ```bash
 mvn test -Dtest=TaskSyntaxValidatorTest -DskipTests=false
 ```
 
-Expected: 3 tests pass.
+预期：3 个测试全部通过。
 
-- [ ] **Step 5: Commit syntax validation**
+- [ ] **步骤 5：提交语法校验**
 
 ```bash
 git add src/main/java/com/paicli/plan/TaskSyntaxValidator.java src/test/java/com/paicli/plan/TaskSyntaxValidatorTest.java
 git commit -m "validate task java changes"
 ```
 
-### Task 4: Serial Plan Task Transactions and Diff Context
+### 任务 4：串行 Plan Task 事务与 Diff 上下文
 
-**Files:**
-- Modify: `src/main/java/com/paicli/agent/PlanExecuteAgent.java`
-- Modify: `src/test/java/com/paicli/agent/PlanExecuteAgentTest.java`
+**文件：**
+- 修改：`src/main/java/com/paicli/agent/PlanExecuteAgent.java`
+- 修改：`src/test/java/com/paicli/agent/PlanExecuteAgentTest.java`
 
-- [ ] **Step 1: Write failing Plan integration tests**
+- [ ] **步骤 1：编写失败的 Plan 集成测试**
 
-Add test fixtures that use a temporary `SnapshotService`, a two-task `StubPlanner`, and scripted LLM responses.
+增加测试夹具，使用临时 `SnapshotService`、包含两个 task 的 `StubPlanner` 和脚本化 LLM 响应。
 
-The first test writes a valid Java file in `task_1`, completes it, and verifies `task_2` receives the dependency diff:
+第一个测试在 `task_1` 写入合法 Java 文件并完成任务，然后验证 `task_2` 收到依赖 diff：
 
 ```java
 @Test
@@ -571,7 +571,7 @@ void injectsSuccessfulTaskDiffIntoDependentTask() throws Exception {
 }
 ```
 
-The second test preserves a successful first-task file when the dependent second task creates invalid Java:
+第二个测试让依赖 task 写入非法 Java，并验证第一个成功 task 的文件仍被保留：
 
 ```java
 @Test
@@ -592,7 +592,7 @@ void rollsBackOnlyFailedTaskAndKeepsPreviousTaskChanges() throws Exception {
 }
 ```
 
-Add the retry and serial-execution tests:
+增加重试和串行执行测试：
 
 ```java
 @Test
@@ -639,7 +639,7 @@ void executesReadyPlanTasksSerially() throws Exception {
 }
 ```
 
-Add these complete fixtures to `PlanExecuteAgentTest`:
+将以下完整夹具加入 `PlanExecuteAgentTest`：
 
 ```java
 private Path createProject(String name) throws IOException {
@@ -835,21 +835,21 @@ private static final class ConcurrentProbeGLMClient extends GLMClient {
 }
 ```
 
-Add imports for `ObjectMapper`, snapshot classes, `Map`, and `AtomicInteger`.
+增加 `ObjectMapper`、snapshot 类、`Map` 和 `AtomicInteger` 的 import。
 
-- [ ] **Step 2: Run Plan tests and verify RED**
+- [ ] **步骤 2：运行 Plan 测试并确认 RED**
 
-Run:
+运行：
 
 ```bash
 mvn test -Dtest=PlanExecuteAgentTest -DskipTests=false
 ```
 
-Expected: new assertions fail because Plan still executes ready tasks in parallel, creates no task checkpoints, and injects no task diff.
+预期：新断言失败，因为 Plan 仍并行执行就绪 task，尚未创建 task checkpoint，也未注入 task diff。
 
-- [ ] **Step 3: Replace batch execution with one-task execution**
+- [ ] **步骤 3：将批量执行改为单 task 执行**
 
-In `executePlan(...)`, select the first ready task from `getExecutableTasksInOrder(plan)` each loop and execute it before selecting another:
+在 `executePlan(...)` 的每轮循环中，从 `getExecutableTasksInOrder(plan)` 选择第一个就绪 task，执行完后再选择下一个：
 
 ```java
 Task task = executableTasks.get(0);
@@ -862,7 +862,7 @@ TaskExecutionResult taskResult = executeSingleTask(
 );
 ```
 
-Replace `executeTaskBatch(...)` with:
+将 `executeTaskBatch(...)` 替换为：
 
 ```java
 private TaskExecutionResult executeSingleTask(
@@ -891,11 +891,11 @@ private TaskExecutionResult executeSingleTask(
 }
 ```
 
-Remove unused executor, future, and byte-buffer imports and code.
+删除不再使用的 executor、future 和字节缓冲区 import 与代码。
 
-- [ ] **Step 4: Add checkpoint lifecycle and validation**
+- [ ] **步骤 4：接入 checkpoint 生命周期与校验**
 
-At the start of `executePlan(...)`, create:
+在 `executePlan(...)` 开头创建：
 
 ```java
 Map<String, TaskCheckpoint> taskCheckpoints = new HashMap<>();
@@ -905,7 +905,7 @@ TaskSyntaxValidator syntaxValidator = new TaskSyntaxValidator();
 Path projectRoot = Path.of(toolRegistry.getProjectPath()).toAbsolutePath().normalize();
 ```
 
-Before a task's first execution:
+在 task 首次执行前：
 
 ```java
 TaskCheckpoint checkpoint = taskCheckpoints.computeIfAbsent(
@@ -914,7 +914,7 @@ TaskCheckpoint checkpoint = taskCheckpoints.computeIfAbsent(
 );
 ```
 
-Before marking a successful task complete:
+在将成功 task 标记为完成前：
 
 ```java
 TaskDiff taskDiff = snapshots.diffTask(checkpoint);
@@ -932,11 +932,11 @@ if (!validation.valid()) {
 }
 ```
 
-If `diffTask(...)` itself fails, log the warning, continue with `TaskDiff.empty(taskId)`, and do not claim diff protection in output.
+如果 `diffTask(...)` 自身失败，记录警告并使用 `TaskDiff.empty(taskId)` 继续执行；输出中不得声称 diff 保护已生效。
 
-- [ ] **Step 5: Restore active task before terminal recovery**
+- [ ] **步骤 5：在终止恢复前还原当前 task**
 
-Add:
+增加：
 
 ```java
 private RestoreResult restoreFailedTask(
@@ -955,20 +955,20 @@ private RestoreResult restoreFailedTask(
 }
 ```
 
-Call it:
+在以下位置调用：
 
-- before `Planner.replan(...)`;
-- for `ROLLBACK`;
-- after `RETRY` or `FIX_PARAMETERS` exhausts the attempt budget;
-- before final failed-task result handling.
+- 调用 `Planner.replan(...)` 之前；
+- 执行 `ROLLBACK` 时；
+- `RETRY` 或 `FIX_PARAMETERS` 用尽恢复次数之后；
+- 最终失败 task 收尾之前。
 
-Do not remove the checkpoint when scheduling a retry. Replace `rollbackAfterFailure(...)` so its response reports task checkpoint restoration rather than `restorePreTurn(1)`.
+安排重试时不要删除 checkpoint。修改 `rollbackAfterFailure(...)`，让响应报告 task checkpoint 恢复结果，不再调用 `restorePreTurn(1)`。
 
-- [ ] **Step 6: Inject dependency-scoped diff context**
+- [ ] **步骤 6：注入依赖范围内的 diff 上下文**
 
-Extend `executeTask(...)` and `buildTaskContext(...)` with `Map<String, TaskDiff> completedTaskDiffs`.
+为 `executeTask(...)` 和 `buildTaskContext(...)` 增加 `Map<String, TaskDiff> completedTaskDiffs` 参数。
 
-Collect transitive dependencies in stable order:
+按稳定顺序收集传递依赖：
 
 ```java
 private void collectDependencyIds(
@@ -987,7 +987,7 @@ private void collectDependencyIds(
 }
 ```
 
-Append only dependency diffs with a shared 12,000-character budget:
+只追加依赖 task 的 diff，并共享 12,000 字符预算：
 
 ```java
 private void appendDependencyDiffs(
@@ -1015,47 +1015,47 @@ private void appendDependencyDiffs(
 }
 ```
 
-- [ ] **Step 7: Run Plan and recovery regression tests**
+- [ ] **步骤 7：运行 Plan 与恢复回归测试**
 
-Run:
+运行：
 
 ```bash
 mvn test -Dtest=PlanExecuteAgentTest,TaskFailureClassifierTest,TaskSyntaxValidatorTest,SideGitManagerTest -DskipTests=false
 ```
 
-Expected: all focused tests pass; the invalid Java fixture is removed while the valid previous-task file remains.
+预期：所有针对性测试通过；非法 Java 测试文件被删除，前序合法 task 文件仍然存在。
 
-- [ ] **Step 8: Commit Plan integration**
+- [ ] **步骤 8：提交 Plan 集成**
 
 ```bash
 git add src/main/java/com/paicli/agent/PlanExecuteAgent.java src/test/java/com/paicli/agent/PlanExecuteAgentTest.java
 git commit -m "add plan task transactions"
 ```
 
-### Task 5: Third-Phase Documentation
+### 任务 5：第三期文档
 
-**Files:**
-- Create: `docs/phase-25-task-checkpoint-diff.md`
-- Modify: `README.md`
-- Modify: `AGENTS.md`
-- Modify: `docs/phase-24-plan-failure-recovery.md`
-- Modify: `docs/phase-18-side-history-snapshot.md`
+**文件：**
+- 新增：`docs/phase-25-task-checkpoint-diff.md`
+- 修改：`README.md`
+- 修改：`AGENTS.md`
+- 修改：`docs/phase-24-plan-failure-recovery.md`
+- 修改：`docs/phase-18-side-history-snapshot.md`
 
-- [ ] **Step 1: Write the third-phase implementation document**
+- [ ] **步骤 1：编写第三期实现文档**
 
-Document:
+文档包含：
 
-- task checkpoint lifecycle;
-- serial Plan execution rationale;
-- retry baseline reuse;
-- Java syntax validation boundary;
-- dependency-only 12,000-character diff context;
-- precise rollback and disabled-checkpoint degradation;
-- exact verification commands and observed results.
+- task checkpoint 生命周期；
+- Plan 串行执行原因；
+- 重试时复用基线；
+- Java 语法校验边界；
+- 只面向依赖 task、上限 12,000 字符的 diff 上下文；
+- 精准回滚和 checkpoint 关闭时的降级；
+- 实际执行的验证命令与结果。
 
-- [ ] **Step 2: Incrementally update the repository homepage**
+- [ ] **步骤 2：增量更新仓库首页**
 
-Add this status section after phase two:
+在第二期之后增加以下状态：
 
 ```markdown
 ### 第三期优化：任务级 Checkpoint 与 Diff
@@ -1067,76 +1067,76 @@ Add this status section after phase two:
 - 详细记录见 [docs/phase-25-task-checkpoint-diff.md](docs/phase-25-task-checkpoint-diff.md)
 ```
 
-Change the roadmap item “为每个任务节点增加 checkpoint 和 diff 审查” to completed wording and make the next unimplemented item the first future step.
+将后续演进中的“为每个任务节点增加 checkpoint 和 diff 审查”改为已完成表述，并让下一项尚未实现的能力成为首个未来步骤。
 
-- [ ] **Step 3: Synchronize behavior docs**
+- [ ] **步骤 3：同步行为文档**
 
-In `AGENTS.md`, record phase 25 as delivered, state that Plan ready tasks are serial while task transactions are active, and add this verification row:
+在 `AGENTS.md` 中记录第三期已经交付，说明 task 事务启用时 Plan 就绪 task 串行执行，并增加以下验证行：
 
 ```markdown
 | Plan task checkpoint | `mvn test -Dtest=SideGitManagerTest,TaskSyntaxValidatorTest,PlanExecuteAgentTest` |
 ```
 
-In phase 24, replace `restorePreTurn(1)` with task-checkpoint restore. In phase 18, keep the historical MVP text but add a note that phase 25 intentionally supersedes the no-task-snapshot limitation for Plan.
+在第二期文档中，将 `restorePreTurn(1)` 替换为 task checkpoint 恢复。在第 18 期文档中保留历史 MVP 描述，但注明第三期有意覆盖 Plan 不做 task 快照的旧限制。
 
-- [ ] **Step 4: Check documentation links and whitespace**
+- [ ] **步骤 4：检查文档链接与空白**
 
-Run:
+运行：
 
 ```bash
 git diff --check
 ```
 
-Expected: no output.
+预期：无输出。
 
-- [ ] **Step 5: Commit documentation**
+- [ ] **步骤 5：提交文档**
 
 ```bash
 git add README.md AGENTS.md docs/phase-18-side-history-snapshot.md docs/phase-24-plan-failure-recovery.md docs/phase-25-task-checkpoint-diff.md
 git commit -m "document third phase task checkpoints"
 ```
 
-### Task 6: Full Verification and Publish
+### 任务 6：完整验证与发布
 
-**Files:**
-- Verify all changed production, test, and documentation files.
+**文件：**
+- 验证所有修改过的生产代码、测试和文档文件。
 
-- [ ] **Step 1: Run focused feature tests**
+- [ ] **步骤 1：运行针对性功能测试**
 
 ```bash
 mvn test -Dtest=SideGitManagerTest,TaskSyntaxValidatorTest,PlanExecuteAgentTest,TaskFailureClassifierTest,AgentRouterTest -DskipTests=false
 ```
 
-Expected: zero failures and zero errors.
+预期：0 failures、0 errors。
 
-- [ ] **Step 2: Run the quick regression profile**
+- [ ] **步骤 2：运行 quick 回归 profile**
 
 ```bash
 mvn test -Pquick
 ```
 
-Expected: `BUILD SUCCESS`.
+预期：`BUILD SUCCESS`。
 
-- [ ] **Step 3: Build the runnable shaded JAR**
+- [ ] **步骤 3：构建可运行的 shaded JAR**
 
 ```bash
 mvn package -DskipTests
 ```
 
-Expected: `BUILD SUCCESS` and `target/paicli-1.0-SNAPSHOT.jar`.
+预期：`BUILD SUCCESS`，并生成 `target/paicli-1.0-SNAPSHOT.jar`。
 
-- [ ] **Step 4: Run the CLI startup smoke test**
+- [ ] **步骤 4：运行 CLI 启动冒烟测试**
 
-PowerShell:
+PowerShell：
 
 ```powershell
 $env:GLM_API_KEY='test-key'
 '/exit' | java -jar target\paicli-1.0-SNAPSHOT.jar
 ```
 
-Expected: process exits with code `0`, prints the startup screen, accepts `/exit`, and performs no model request.
+预期：进程退出码为 `0`，打印启动界面，接受 `/exit`，且不会发起模型请求。
 
-- [ ] **Step 5: Inspect final repository state**
+- [ ] **步骤 5：检查最终仓库状态**
 
 ```bash
 git status -sb
@@ -1144,12 +1144,12 @@ git log -6 --oneline --decorate
 git diff origin/main...HEAD --check
 ```
 
-Expected: only intentional commits are ahead of `origin/main`; no unstaged files or whitespace errors.
+预期：只有本次有意提交领先 `origin/main`；不存在未暂存文件或空白错误。
 
-- [ ] **Step 6: Push the current main branch**
+- [ ] **步骤 6：推送当前 main 分支**
 
 ```bash
 git push origin main
 ```
 
-Expected: `origin/main` advances to the final third-phase documentation commit.
+预期：`origin/main` 前进到第三期最终文档提交。
