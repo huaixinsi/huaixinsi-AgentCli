@@ -71,6 +71,45 @@ public class SnapshotService implements AutoCloseable {
         return manager.restorePreTurn(offset);
     }
 
+    public TaskCheckpoint beginTask(String taskId, String summary) {
+        if (!manager.config().enabled()) {
+            return TaskCheckpoint.unavailable(taskId);
+        }
+        try {
+            TurnSnapshot snapshot = manager.preTaskSnapshot(taskId, summary);
+            return new TaskCheckpoint(taskId, snapshot.commitId(), snapshot.createdAt(), true);
+        } catch (Exception e) {
+            System.err.println("task checkpoint unavailable [" + taskId + "]: " + e.getMessage());
+            return TaskCheckpoint.unavailable(taskId);
+        }
+    }
+
+    public TaskDiff diffTask(TaskCheckpoint checkpoint) throws Exception {
+        if (checkpoint == null || !checkpoint.active()) {
+            return TaskDiff.empty(checkpoint == null ? "" : checkpoint.taskId());
+        }
+        return manager.diffFromSnapshot(checkpoint.taskId(), checkpoint.snapshotCommitId());
+    }
+
+    public void completeTask(TaskCheckpoint checkpoint, String summary) {
+        if (checkpoint == null || !checkpoint.active()) {
+            return;
+        }
+        try {
+            manager.postTaskSnapshot(checkpoint.taskId(), summary);
+        } catch (Exception e) {
+            System.err.println("post-task snapshot unavailable [" + checkpoint.taskId() + "]: " + e.getMessage());
+        }
+    }
+
+    public RestoreResult restoreTask(TaskCheckpoint checkpoint) throws Exception {
+        if (checkpoint == null || !checkpoint.active()) {
+            return RestoreResult.failure("task checkpoint unavailable");
+        }
+        awaitIdle();
+        return manager.restoreSnapshot(checkpoint.snapshotCommitId(), checkpoint.taskId());
+    }
+
     public String status() {
         return manager.formatStatus();
     }

@@ -87,4 +87,70 @@ class SideGitManagerTest {
         assertFalse(checkpoint.active());
         assertEquals("", checkpoint.snapshotCommitId());
     }
+
+    @Test
+    void capturesTaskDiffAndRestoresOnlyToTaskBaseline() throws Exception {
+        Path project = tempDir.resolve("task-project");
+        Path snapshots = tempDir.resolve("task-snapshots");
+        Files.createDirectories(project);
+        Files.writeString(project.resolve("kept.txt"), "successful previous task");
+        Files.writeString(project.resolve("changed.txt"), "before");
+        Files.writeString(project.resolve("deleted.txt"), "remove me");
+
+        SideGitManager manager = new SideGitManager(project,
+                new SnapshotConfig(true, snapshots, 50, List.of(".git", "target")));
+        TurnSnapshot preTask = manager.preTaskSnapshot("task_2", "before task 2");
+
+        Files.writeString(project.resolve("changed.txt"), "after\nnew line");
+        Files.writeString(project.resolve("created.txt"), "created");
+        Files.delete(project.resolve("deleted.txt"));
+
+        TaskDiff diff = manager.diffFromSnapshot("task_2", preTask.commitId());
+        RestoreResult restored = manager.restoreSnapshot(preTask.commitId(), "task_2");
+
+        assertEquals(List.of("changed.txt", "created.txt", "deleted.txt"), diff.changedFiles());
+        assertTrue(diff.additions() > 0);
+        assertTrue(diff.deletions() > 0);
+        assertTrue(diff.unifiedDiff().contains("created.txt"));
+        assertTrue(restored.success());
+        assertEquals("successful previous task", Files.readString(project.resolve("kept.txt")));
+        assertEquals("before", Files.readString(project.resolve("changed.txt")));
+        assertTrue(Files.exists(project.resolve("deleted.txt")));
+        assertFalse(Files.exists(project.resolve("created.txt")));
+    }
+
+    @Test
+    void recordsTaskSnapshotPhases() throws Exception {
+        Path project = tempDir.resolve("phase-project");
+        Path snapshots = tempDir.resolve("phase-snapshots");
+        Files.createDirectories(project);
+        SideGitManager manager = new SideGitManager(project,
+                new SnapshotConfig(true, snapshots, 50, List.of(".git", "target")));
+
+        manager.preTaskSnapshot("task_1", "before");
+        manager.postTaskSnapshot("task_1", "after");
+
+        List<TurnSnapshot> all = manager.listSnapshots(2);
+        assertEquals(SnapshotPhase.POST_TASK, all.get(0).phase());
+        assertEquals(SnapshotPhase.PRE_TASK, all.get(1).phase());
+    }
+
+    @Test
+    void disabledSnapshotServiceReturnsInactiveTaskCheckpoint() throws Exception {
+        Path project = tempDir.resolve("disabled-project");
+        Files.createDirectories(project);
+        SnapshotConfig config = new SnapshotConfig(
+                false,
+                tempDir.resolve("disabled-snapshots"),
+                50,
+                List.of(".git", "target")
+        );
+
+        try (SnapshotService service = new SnapshotService(new SideGitManager(project, config))) {
+            TaskCheckpoint checkpoint = service.beginTask("task_1", "disabled");
+
+            assertFalse(checkpoint.active());
+            assertTrue(service.diffTask(checkpoint).changedFiles().isEmpty());
+        }
+    }
 }

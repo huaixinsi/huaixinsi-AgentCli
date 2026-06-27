@@ -2,15 +2,22 @@ package com.paicli.snapshot;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.diff.DiffFormatter;
+import org.eclipse.jgit.diff.RawTextComparator;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
+import org.eclipse.jgit.lib.ObjectReader;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.treewalk.CanonicalTreeParser;
+import org.eclipse.jgit.treewalk.FileTreeIterator;
 import org.eclipse.jgit.treewalk.TreeWalk;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -53,6 +60,16 @@ public class SideGitManager {
 
     public synchronized TurnSnapshot postTurnSnapshot(String turnId, String summary) throws IOException, GitAPIException {
         return createSnapshot(SnapshotPhase.POST_TURN, turnId, summary);
+    }
+
+    public synchronized TurnSnapshot preTaskSnapshot(String taskId, String summary)
+            throws IOException, GitAPIException {
+        return createSnapshot(SnapshotPhase.PRE_TASK, taskId, summary);
+    }
+
+    public synchronized TurnSnapshot postTaskSnapshot(String taskId, String summary)
+            throws IOException, GitAPIException {
+        return createSnapshot(SnapshotPhase.POST_TASK, taskId, summary);
     }
 
     public synchronized TurnSnapshot preRestoreSnapshot(String turnId, String summary) throws IOException, GitAPIException {
@@ -110,16 +127,68 @@ public class SideGitManager {
             return RestoreResult.failure("找不到最近第 " + normalizedOffset + " 个 pre-turn 快照");
         }
         TurnSnapshot target = preTurns.get(normalizedOffset - 1);
-        TurnSnapshot current = preRestoreSnapshot("restore-" + Instant.now().toEpochMilli(),
-                "Before restoring " + target.shortCommitId());
+        return restoreSnapshot(target.commitId(), target.turnId());
+    }
+
+    public synchronized TaskDiff diffFromSnapshot(String taskId, String commitId)
+            throws IOException, GitAPIException {
+        if (!config.enabled()) {
+            return TaskDiff.empty(taskId);
+        }
+        try (Git git = openGit();
+             Repository repository = git.getRepository();
+             RevWalk walk = new RevWalk(repository);
+             ObjectReader reader = repository.newObjectReader();
+             ByteArrayOutputStream output = new ByteArrayOutputStream();
+             DiffFormatter formatter = new DiffFormatter(output)) {
+            RevCommit commit = walk.parseCommit(ObjectId.fromString(commitId));
+            CanonicalTreeParser oldTree = new CanonicalTreeParser();
+            oldTree.reset(reader, commit.getTree().getId());
+            FileTreeIterator workTree = new FileTreeIterator(repository);
+
+            formatter.setRepository(repository);
+            formatter.setDiffComparator(RawTextComparator.DEFAULT);
+            formatter.setDetectRenames(true);
+            List<DiffEntry> entries = new ArrayList<>(formatter.scan(oldTree, workTree));
+            entries.sort(Comparator.comparing(SideGitManager::changedPath));
+            for (DiffEntry entry : entries) {
+                formatter.format(entry);
+            }
+            formatter.flush();
+
+            String patch = output.toString(StandardCharsets.UTF_8);
+            List<String> changedFiles = entries.stream()
+                    .map(SideGitManager::changedPath)
+                    .distinct()
+                    .toList();
+            return new TaskDiff(
+                    taskId,
+                    changedFiles,
+                    countPatchLines(patch, "+", "+++"),
+                    countPatchLines(patch, "-", "---"),
+                    patch
+            );
+        }
+    }
+
+    public synchronized RestoreResult restoreSnapshot(String commitId, String contextId)
+            throws IOException, GitAPIException {
+        if (!config.enabled()) {
+            return RestoreResult.failure("快照功能已关闭");
+        }
+        ObjectId targetId = ObjectId.fromString(commitId);
+        TurnSnapshot current = preRestoreSnapshot(
+                "restore-" + safeTurnId(contextId) + "-" + Instant.now().toEpochMilli(),
+                "Before restoring " + targetId.abbreviate(10).name()
+        );
         try (Git git = openGit(); Repository repository = git.getRepository()) {
-            Map<String, ObjectId> targetTree = treeEntries(repository, ObjectId.fromString(target.commitId()));
+            Map<String, ObjectId> targetTree = treeEntries(repository, targetId);
             Map<String, ObjectId> currentTree = current == null
                     ? Map.of()
                     : treeEntries(repository, ObjectId.fromString(current.commitId()));
             List<String> removed = deleteTrackedFilesMissingFromTarget(currentTree, targetTree);
             List<String> restored = writeTargetTree(repository, targetTree);
-            return RestoreResult.success(target.commitId(), restored, removed);
+            return RestoreResult.success(commitId, restored, removed);
         }
     }
 
@@ -317,6 +386,22 @@ public class SideGitManager {
             }
         }
         return false;
+    }
+
+    private static String changedPath(DiffEntry entry) {
+        return entry.getChangeType() == DiffEntry.ChangeType.DELETE
+                ? entry.getOldPath()
+                : entry.getNewPath();
+    }
+
+    private static int countPatchLines(String patch, String prefix, String headerPrefix) {
+        int count = 0;
+        for (String line : patch.split("\\R", -1)) {
+            if (line.startsWith(prefix) && !line.startsWith(headerPrefix)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static void deleteRecursively(Path root) throws IOException {
