@@ -68,7 +68,7 @@ class ShellDialectTest {
 Run:
 
 ```powershell
-mvn -q -Dtest=ShellDialectTest test
+mvn -q -DskipTests=false -Dtest=ShellDialectTest test
 ```
 
 Expected: compilation fails because `ShellDialect` does not exist.
@@ -120,7 +120,7 @@ public enum ShellDialect {
 Run:
 
 ```powershell
-mvn -q -Dtest=ShellDialectTest test
+mvn -q -DskipTests=false -Dtest=ShellDialectTest test
 ```
 
 Expected: 2 tests pass.
@@ -185,7 +185,7 @@ void parsesFileDescriptorRedirection() {
 Run:
 
 ```powershell
-mvn -q -Dtest=CommandRiskAnalyzerTest test
+mvn -q -DskipTests=false -Dtest=CommandRiskAnalyzerTest test
 ```
 
 Expected: compilation fails because `CommandRiskAnalyzer` does not exist.
@@ -258,7 +258,7 @@ No risk rule is evaluated in this task; structurally valid commands return `risk
 Run:
 
 ```powershell
-mvn -q -Dtest=CommandRiskAnalyzerTest test
+mvn -q -DskipTests=false -Dtest=CommandRiskAnalyzerTest test
 ```
 
 Expected: all structure tests pass.
@@ -332,7 +332,7 @@ void rejectsUnclosedSubstitutionAndRecursionOverflow() {
 Run:
 
 ```powershell
-mvn -q -Dtest=CommandRiskAnalyzerTest test
+mvn -q -DskipTests=false -Dtest=CommandRiskAnalyzerTest test
 ```
 
 Expected: substitution and nested-shell assertions fail.
@@ -373,7 +373,7 @@ Nested extraction must honor the active quote and escape rules and must not trea
 Run:
 
 ```powershell
-mvn -q -Dtest=CommandRiskAnalyzerTest test
+mvn -q -DskipTests=false -Dtest=CommandRiskAnalyzerTest test
 ```
 
 Expected: all parser, escape, substitution, and recursion tests pass.
@@ -450,7 +450,7 @@ Update the existing Bash substitution test to call `CommandGuard.check(command, 
 Run:
 
 ```powershell
-mvn -q -Dtest=CommandGuardTest,CommandRiskAnalyzerTest test
+mvn -q -DskipTests=false -Dtest=CommandGuardTest,CommandRiskAnalyzerTest test
 ```
 
 Expected: quoted-data, split-flag, nested-shell, and device-redirection assertions fail.
@@ -526,7 +526,7 @@ Update its class comment to state that this is a bounded structural auxiliary de
 Run:
 
 ```powershell
-mvn -q -Dtest=CommandGuardTest,CommandRiskAnalyzerTest test
+mvn -q -DskipTests=false -Dtest=CommandGuardTest,CommandRiskAnalyzerTest test
 ```
 
 Expected: all policy and analyzer tests pass, including every pre-existing `CommandGuardTest`.
@@ -570,7 +570,7 @@ Use a command form valid in the test host's active dialect. Keep this test focus
 Run:
 
 ```powershell
-mvn -q -Dtest=ToolRegistryTest#shouldAllowQuotedRiskWordsButRejectStructuredRisk test
+mvn -q -DskipTests=false -Dtest=ToolRegistryTest#shouldAllowQuotedRiskWordsButRejectStructuredRisk test
 ```
 
 Expected: the quoted command is rejected by the old whole-string regex guard.
@@ -597,7 +597,7 @@ Remove `shellCommand(String)` and `isWindows()` from `ToolRegistry`, and add the
 Run:
 
 ```powershell
-mvn -q -Dtest=ToolRegistryTest,CommandGuardTest,CommandRiskAnalyzerTest,ShellDialectTest,ApprovalPolicyTest,AuditLogTest test
+mvn -q -DskipTests=false -Dtest=ToolRegistryTest,CommandGuardTest,CommandRiskAnalyzerTest,ShellDialectTest,ApprovalPolicyTest,AuditLogTest test
 ```
 
 Expected: all selected suites pass.
@@ -666,7 +666,7 @@ Create `docs/phase-26-command-risk-analysis.md` with these complete sections:
 Run:
 
 ```powershell
-mvn -q -Dtest=ShellDialectTest,CommandRiskAnalyzerTest,CommandGuardTest,ToolRegistryTest test
+mvn -q -DskipTests=false -Dtest=ShellDialectTest,CommandRiskAnalyzerTest,CommandGuardTest,ToolRegistryTest test
 ```
 
 Expected: all focused tests pass.
@@ -676,7 +676,7 @@ Expected: all focused tests pass.
 Run:
 
 ```powershell
-mvn -q test
+mvn -q -DskipTests=false test
 ```
 
 Expected: build succeeds with zero test failures and zero test errors.
