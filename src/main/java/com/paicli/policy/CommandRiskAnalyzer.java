@@ -3,6 +3,7 @@ package com.paicli.policy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Shell command lexer and risk analyzer.
@@ -15,6 +16,12 @@ public final class CommandRiskAnalyzer {
     private static final int MAX_SEGMENTS = 128;
     private static final int MAX_TOKENS = 1_024;
     private static final int MAX_RECURSION_DEPTH = 12;
+    private static final Map<String, CommandRisk> EXACT_COMMAND_RISKS = Map.of(
+            "sudo", risk("SUDO", "禁止 sudo 提权"),
+            "shutdown", risk("POWER", "禁止 shutdown / reboot / halt"),
+            "reboot", risk("POWER", "禁止 shutdown / reboot / halt"),
+            "halt", risk("POWER", "禁止 shutdown / reboot / halt"),
+            "poweroff", risk("POWER", "禁止 shutdown / reboot / halt"));
 
     public Analysis analyze(String command, ShellDialect dialect) {
         ShellDialect actualDialect = dialect == null ? ShellDialect.current() : dialect;
@@ -50,6 +57,30 @@ public final class CommandRiskAnalyzer {
             nestedAnalyses.add(nested);
             if (nested.risk() != null) {
                 return new Analysis(dialect, parsed.segments(), nestedAnalyses, nested.risk());
+            }
+        }
+
+        if (isForkBomb(source)) {
+            return new Analysis(
+                    dialect,
+                    parsed.segments(),
+                    nestedAnalyses,
+                    risk("FORK_BOMB", "识别为 fork bomb"));
+        }
+
+        for (int index = 0; index < parsed.segments().size(); index++) {
+            CommandSegment segment = parsed.segments().get(index);
+            CommandRisk segmentRisk = evaluateSegment(segment);
+            if (segmentRisk != null) {
+                return new Analysis(dialect, parsed.segments(), nestedAnalyses, segmentRisk);
+            }
+            if (index + 1 < parsed.segments().size()
+                    && isDownloadToShellPipeline(segment, parsed.segments().get(index + 1))) {
+                return new Analysis(
+                        dialect,
+                        parsed.segments(),
+                        nestedAnalyses,
+                        risk("DOWNLOAD_PIPE_SHELL", "禁止 curl / wget 管道直接执行远端脚本"));
             }
         }
         return new Analysis(dialect, parsed.segments(), nestedAnalyses, null);
@@ -105,6 +136,159 @@ public final class CommandRiskAnalyzer {
 
     private static CommandRisk limitRisk() {
         return new CommandRisk("PARSE_LIMIT", "命令结构超过安全分析上限");
+    }
+
+    private static CommandRisk risk(String code, String reason) {
+        return new CommandRisk(code, reason);
+    }
+
+    private static CommandRisk evaluateSegment(CommandSegment segment) {
+        String executable = normalizeExecutable(segment.executable());
+        CommandRisk exactRisk = EXACT_COMMAND_RISKS.get(executable);
+        if (exactRisk != null) {
+            return exactRisk;
+        }
+        if (executable.equals("rm")
+                && hasRmRecursiveFlag(segment.arguments())
+                && hasRmForceFlag(segment.arguments())
+                && segment.arguments().stream().anyMatch(CommandRiskAnalyzer::isBroadTarget)) {
+            return risk("RM_BROAD", "禁止 rm -rf 删除全盘或用户目录");
+        }
+        if (executable.equals("mkfs") || executable.startsWith("mkfs.")) {
+            return risk("MKFS", "禁止 mkfs 格式化磁盘");
+        }
+        if (executable.equals("dd") && hasRawDeviceOutput(segment.arguments())) {
+            return risk("DD_DEVICE", "禁止 dd 写入裸设备");
+        }
+        if (executable.equals("find")
+                && segment.arguments().stream().anyMatch(CommandRiskAnalyzer::isBroadTarget)) {
+            return risk("FIND_BROAD", "不允许扫描 /、~ 或整个文件系统");
+        }
+        if (executable.equals("chmod")
+                && hasRecursiveFlag(segment.arguments())
+                && segment.arguments().stream().anyMatch("777"::equals)
+                && segment.arguments().stream().anyMatch(CommandRiskAnalyzer::isBroadTarget)) {
+            return risk("CHMOD_BROAD", "禁止 chmod 777 全盘");
+        }
+        if (segment.redirections().stream()
+                .anyMatch(redirection -> redirection.operator().contains(">")
+                        && isRawDevice(redirection.target()))) {
+            return risk("DEVICE_REDIRECT", "禁止输出重定向写入裸设备");
+        }
+        return null;
+    }
+
+    private static String normalizeExecutable(String executable) {
+        String normalized = executable.replace('\\', '/');
+        int lastSlash = normalized.lastIndexOf('/');
+        if (lastSlash >= 0) {
+            normalized = normalized.substring(lastSlash + 1);
+        }
+        normalized = normalized.toLowerCase(Locale.ROOT);
+        for (String extension : List.of(".exe", ".cmd", ".bat")) {
+            if (normalized.endsWith(extension)) {
+                return normalized.substring(0, normalized.length() - extension.length());
+            }
+        }
+        return normalized;
+    }
+
+    private static boolean hasRmRecursiveFlag(List<String> arguments) {
+        return arguments.stream().anyMatch(argument ->
+                argument.equalsIgnoreCase("--recursive")
+                        || hasShortFlag(argument, 'r'));
+    }
+
+    private static boolean hasRmForceFlag(List<String> arguments) {
+        return arguments.stream().anyMatch(argument ->
+                argument.equalsIgnoreCase("--force")
+                        || hasShortFlag(argument, 'f'));
+    }
+
+    private static boolean hasRecursiveFlag(List<String> arguments) {
+        return arguments.stream().anyMatch(argument ->
+                argument.equalsIgnoreCase("--recursive")
+                        || hasShortFlag(argument, 'r'));
+    }
+
+    private static boolean hasShortFlag(String argument, char expected) {
+        if (!argument.startsWith("-") || argument.startsWith("--")) {
+            return false;
+        }
+        for (int index = 1; index < argument.length(); index++) {
+            if (Character.toLowerCase(argument.charAt(index)) == expected) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isBroadTarget(String value) {
+        String normalized = value.trim().toLowerCase(Locale.ROOT).replace('\\', '/');
+        return normalized.equals("/")
+                || normalized.startsWith("/*")
+                || normalized.equals("~")
+                || normalized.startsWith("~/")
+                || normalized.equals("$home")
+                || normalized.startsWith("$home/")
+                || normalized.equals("${home}")
+                || normalized.startsWith("${home}/");
+    }
+
+    private static boolean hasRawDeviceOutput(List<String> arguments) {
+        for (String argument : arguments) {
+            int separator = argument.indexOf('=');
+            if (separator <= 0) {
+                continue;
+            }
+            String key = argument.substring(0, separator);
+            String value = argument.substring(separator + 1);
+            if (key.equalsIgnoreCase("of") && value.toLowerCase(Locale.ROOT).startsWith("/dev/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isRawDevice(String value) {
+        String normalized = value.trim().toLowerCase(Locale.ROOT).replace('/', '\\');
+        if (normalized.startsWith("\\\\.\\physicaldrive")) {
+            return true;
+        }
+        normalized = normalized.replace('\\', '/');
+        return normalized.startsWith("/dev/sd")
+                || normalized.startsWith("/dev/nvme")
+                || normalized.startsWith("/dev/mmcblk");
+    }
+
+    private static boolean isDownloadToShellPipeline(
+            CommandSegment source,
+            CommandSegment target) {
+        if (source.connectorToNext() != Connector.PIPE) {
+            return false;
+        }
+        String sourceExecutable = normalizeExecutable(source.executable());
+        String targetExecutable = normalizeExecutable(target.executable());
+        return (sourceExecutable.equals("curl") || sourceExecutable.equals("wget"))
+                && isShellInterpreter(targetExecutable);
+    }
+
+    private static boolean isShellInterpreter(String executable) {
+        return isPosixShell(executable)
+                || executable.equals("powershell")
+                || executable.equals("pwsh")
+                || executable.equals("cmd");
+    }
+
+    private static boolean isForkBomb(String command) {
+        StringBuilder compact = new StringBuilder(command.length());
+        for (int index = 0; index < command.length(); index++) {
+            char value = command.charAt(index);
+            if (!Character.isWhitespace(value)) {
+                compact.append(value);
+            }
+        }
+        return compact.toString().equals(":(){:|:&};:");
     }
 
     private static NestedCommand nestedShellCommand(CommandSegment segment) {
@@ -473,7 +657,18 @@ public final class CommandRiskAnalyzer {
             }
 
             String executable = current.words.get(0);
-            List<String> arguments = current.words.subList(1, current.words.size());
+            int argumentStart = 1;
+            if (dialect == ShellDialect.POWERSHELL && executable.equals("&")) {
+                if (current.words.size() < 2) {
+                    risk = parseRisk("PowerShell 调用运算符后缺少命令");
+                    return;
+                }
+                executable = current.words.get(1);
+                argumentStart = 2;
+            } else if (dialect == ShellDialect.POWERSHELL && executable.startsWith("&")) {
+                executable = executable.substring(1);
+            }
+            List<String> arguments = current.words.subList(argumentStart, current.words.size());
             segments.add(new CommandSegment(
                     executable,
                     arguments,

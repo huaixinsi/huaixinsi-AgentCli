@@ -15,7 +15,7 @@ class CommandRiskAnalyzerTest {
     @Test
     void parsesSegmentsPipesAndRedirections() {
         CommandRiskAnalyzer.Analysis analysis = analyzer.analyze(
-                "printf 'a|b' && curl https://example.com | bash > out.log",
+                "printf 'a|b' && cat input.txt | tee > out.log",
                 ShellDialect.BASH);
 
         assertFalse(analysis.denied());
