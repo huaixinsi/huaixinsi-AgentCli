@@ -666,7 +666,8 @@ Create `docs/phase-26-command-risk-analysis.md` with these complete sections:
 Run:
 
 ```powershell
-mvn -q -DskipTests=false '-Dtest=ShellDialectTest,CommandRiskAnalyzerTest,CommandGuardTest,ToolRegistryTest' test
+mvn -q -DskipTests=false '-Dtest=ShellDialectTest,CommandRiskAnalyzerTest,CommandGuardTest' test
+mvn -q -DskipTests=false '-Dtest=ToolRegistryTest#shouldAllowQuotedRiskWordsButRejectStructuredRisk+shouldRejectBroadFilesystemScan+shouldRunCommandInProjectDirectory' test
 ```
 
 Expected: all focused tests pass.
@@ -679,7 +680,7 @@ Run:
 mvn -q -DskipTests=false test
 ```
 
-Expected: build succeeds with zero test failures and zero test errors.
+Expected: command-risk tests remain green. Compare any unrelated Windows failures with the recorded pre-change baseline instead of attributing them to this task.
 
 - [ ] **Step 6: Build the runnable JAR**
 
@@ -689,17 +690,19 @@ Run:
 mvn -q -DskipTests package
 ```
 
-Expected: exit code 0 and `target/paicli-1.0.0.jar` exists.
+Expected: exit code 0 and `target/paicli-1.0-SNAPSHOT.jar` exists.
 
 - [ ] **Step 7: Run CLI smoke verification**
 
 Run:
 
 ```powershell
-java -jar target/paicli-1.0.0.jar --help
+$env:GLM_API_KEY='smoke-test'
+java -jar target/paicli-1.0-SNAPSHOT.jar
+# Wait for the PaiCLI prompt, then enter /exit.
 ```
 
-Expected: process exits normally and prints PaiCLI help without startup exceptions.
+Expected: PaiCLI prints the banner and interactive prompt, then `/exit` terminates normally.
 
 - [ ] **Step 8: Check diff hygiene**
 

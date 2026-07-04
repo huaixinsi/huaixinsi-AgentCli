@@ -78,6 +78,16 @@ flowchart LR
 - Side-Git 初始化不会改写普通仓库或 linked worktree 的 `.git` 状态
 - 详细记录见 [docs/phase-25-task-checkpoint-diff.md](docs/phase-25-task-checkpoint-diff.md)
 
+### 第四期优化：结构化命令风险分析
+
+- 新增 `ShellDialect` 与 `CommandRiskAnalyzer`，统一覆盖 Bash、PowerShell 和 cmd
+- 先解析命令段、参数、管道、重定向和命令替换，再执行风险规则
+- 递归检查 `$()`、Bash 反引号以及 `bash -c`、`powershell -Command`、`cmd /c`
+- 能区分引号中的普通文本与真正执行结构，减少整串正则造成的误报
+- 分析与 `ProcessBuilder` 共用同一个 Shell 方言选择，避免安全判断和真实执行漂移
+- 该能力仍是 HITL 前的辅助防线，不是完整 Shell 解析器或进程沙箱
+- 详细记录见 [docs/phase-26-command-risk-analysis.md](docs/phase-26-command-risk-analysis.md)
+
 详细设想见 [docs/agent-routing-vision.md](docs/agent-routing-vision.md)。
 
 ## 后续演进
@@ -86,6 +96,6 @@ flowchart LR
 
 1. 让路由结果参与更细粒度的任务规划。
 2. 为 Multi-Agent 增加角色分工、评审者和评分机制。
-3. 将 MCP、RAG、长期记忆、命令安全分析逐步接入路由决策。
+3. 将 MCP、RAG、长期记忆和安全策略结果逐步接入路由决策。
 
 这个仓库会按“先建立入口，再逐步增强”的方式推进。

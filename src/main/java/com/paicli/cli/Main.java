@@ -96,7 +96,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *   - inline 流式：prompt 下方 inline 状态区、行内可折叠工具块、行内 git diff、单字符 HITL 提示、命令 palette
  *   - lanterna：保留 phase-16 全屏窗口（向后兼容 PAICLI_TUI=true）
  *   - plain：纯 println 兜底
- * HITL 增强：路径围栏（PathGuard）、命令快速拒绝（CommandGuard）、操作审计链（AuditLog）—— 见 com.paicli.policy
+ * HITL 增强：路径围栏（PathGuard）、结构化命令风险分析（CommandGuard）、操作审计链（AuditLog）—— 见 com.paicli.policy
  */
 public class Main {
     private static final String VERSION = "16.1.0";
@@ -1537,7 +1537,7 @@ public class Main {
         out.println("   项目根: " + reactAgent.getToolRegistry().getProjectPath());
         out.println("   危险工具: " + String.join(", ", ApprovalPolicy.getDangerousTools()) + "，以及所有 mcp__ 前缀工具");
         out.println("   路径围栏: 强制限定在项目根之内（read_file / write_file / list_dir / create_project）");
-        out.println("   命令黑名单: sudo / rm -rf 全盘 / mkfs / dd of=/dev / fork bomb / curl|sh / find / / chmod 777 / / shutdown");
+        out.println("   命令风险分析: 按 Shell 结构识别高危命令、参数、管道、重定向与命令替换");
         out.println("   写入文件上限: 5MB");
         out.println("   命令执行上限: 60 秒，输出 8KB（截断）");
         out.println("   审计目录: " + reactAgent.getToolRegistry().getAuditLog().getAuditDir());
