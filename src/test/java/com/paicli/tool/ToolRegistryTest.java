@@ -13,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolRegistryTest {
@@ -34,6 +35,21 @@ class ToolRegistryTest {
         String result = registry.executeTool("execute_command", "{\"command\":\"find / -name \\\"pom.xml\\\" -type f | head -20\"}");
 
         assertTrue(result.contains("策略拒绝"));
+    }
+
+    @Test
+    void shouldAllowQuotedRiskWordsButRejectStructuredRisk() {
+        ToolRegistry registry = new ToolRegistry();
+
+        String quoted = registry.executeTool(
+                "execute_command",
+                "{\"command\":\"echo \\\"sudo rm -rf /\\\"\"}");
+        String chained = registry.executeTool(
+                "execute_command",
+                "{\"command\":\"echo ok && shutdown /s\"}");
+
+        assertFalse(quoted.contains("策略拒绝"));
+        assertTrue(chained.contains("策略拒绝"));
     }
 
     @Test

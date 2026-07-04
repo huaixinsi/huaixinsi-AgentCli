@@ -19,6 +19,7 @@ import com.paicli.policy.AuditLog;
 import com.paicli.policy.CommandGuard;
 import com.paicli.policy.PathGuard;
 import com.paicli.policy.PolicyException;
+import com.paicli.policy.ShellDialect;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.snapshot.RestoreResult;
 import com.paicli.snapshot.SnapshotService;
@@ -1235,7 +1236,8 @@ public class ToolRegistry {
         if (normalized.isEmpty()) {
             return "执行命令失败: 命令不能为空";
         }
-        String denyReason = CommandGuard.check(normalized);
+        ShellDialect dialect = ShellDialect.current();
+        String denyReason = CommandGuard.check(normalized, dialect);
         if (denyReason != null) {
             // 抛 PolicyException 让外层 executeTool 统一写 audit 并格式化拒绝消息，
             // 命令围栏与路径围栏的拒绝路径走同一个出口。
@@ -1250,7 +1252,7 @@ public class ToolRegistry {
 
         Process process = null;
         try {
-            ProcessBuilder pb = new ProcessBuilder(shellCommand(normalized));
+            ProcessBuilder pb = new ProcessBuilder(dialect.invocation(normalized));
             pb.directory(new File(projectPath));
             pb.redirectErrorStream(true);
             process = pb.start();
@@ -1283,22 +1285,6 @@ public class ToolRegistry {
         } finally {
             outputReaderExecutor.shutdownNow();
         }
-    }
-
-    private List<String> shellCommand(String command) {
-        if (isWindows()) {
-            String shell = System.getenv("PAICLI_WINDOWS_SHELL");
-            if (shell != null && shell.equalsIgnoreCase("cmd")) {
-                return List.of("cmd.exe", "/c", command);
-            }
-            return List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command);
-        }
-        return List.of("bash", "-c", command);
-    }
-
-    private boolean isWindows() {
-        String os = System.getProperty("os.name");
-        return os != null && os.toLowerCase().contains("win");
     }
 
     private String readProcessOutput(Process process) throws Exception {
