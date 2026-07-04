@@ -450,7 +450,7 @@ Update the existing Bash substitution test to call `CommandGuard.check(command, 
 Run:
 
 ```powershell
-mvn -q -DskipTests=false -Dtest=CommandGuardTest,CommandRiskAnalyzerTest test
+mvn -q -DskipTests=false '-Dtest=CommandGuardTest,CommandRiskAnalyzerTest' test
 ```
 
 Expected: quoted-data, split-flag, nested-shell, and device-redirection assertions fail.
@@ -526,7 +526,7 @@ Update its class comment to state that this is a bounded structural auxiliary de
 Run:
 
 ```powershell
-mvn -q -DskipTests=false -Dtest=CommandGuardTest,CommandRiskAnalyzerTest test
+mvn -q -DskipTests=false '-Dtest=CommandGuardTest,CommandRiskAnalyzerTest' test
 ```
 
 Expected: all policy and analyzer tests pass, including every pre-existing `CommandGuardTest`.
@@ -597,7 +597,7 @@ Remove `shellCommand(String)` and `isWindows()` from `ToolRegistry`, and add the
 Run:
 
 ```powershell
-mvn -q -DskipTests=false -Dtest=ToolRegistryTest,CommandGuardTest,CommandRiskAnalyzerTest,ShellDialectTest,ApprovalPolicyTest,AuditLogTest test
+mvn -q -DskipTests=false '-Dtest=ToolRegistryTest,CommandGuardTest,CommandRiskAnalyzerTest,ShellDialectTest,ApprovalPolicyTest,AuditLogTest' test
 ```
 
 Expected: all selected suites pass.
@@ -666,7 +666,7 @@ Create `docs/phase-26-command-risk-analysis.md` with these complete sections:
 Run:
 
 ```powershell
-mvn -q -DskipTests=false -Dtest=ShellDialectTest,CommandRiskAnalyzerTest,CommandGuardTest,ToolRegistryTest test
+mvn -q -DskipTests=false '-Dtest=ShellDialectTest,CommandRiskAnalyzerTest,CommandGuardTest,ToolRegistryTest' test
 ```
 
 Expected: all focused tests pass.
