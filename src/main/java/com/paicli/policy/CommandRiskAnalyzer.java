@@ -13,8 +13,10 @@ import java.util.Map;
  */
 public final class CommandRiskAnalyzer {
 
+    private static final int MAX_COMMAND_CHARS = 65_536;
     private static final int MAX_SEGMENTS = 128;
     private static final int MAX_TOKENS = 1_024;
+    private static final int MAX_NESTED_COMMANDS = 128;
     private static final int MAX_RECURSION_DEPTH = 12;
     private static final Map<String, CommandRisk> EXACT_COMMAND_RISKS = Map.of(
             "sudo", risk("SUDO", "禁止 sudo 提权"),
@@ -30,7 +32,7 @@ public final class CommandRiskAnalyzer {
     }
 
     private Analysis analyze(String source, ShellDialect dialect, int depth) {
-        if (depth > MAX_RECURSION_DEPTH) {
+        if (source.length() > MAX_COMMAND_CHARS || depth > MAX_RECURSION_DEPTH) {
             return new Analysis(dialect, List.of(), List.of(), limitRisk());
         }
 
@@ -185,12 +187,26 @@ public final class CommandRiskAnalyzer {
             normalized = normalized.substring(lastSlash + 1);
         }
         normalized = normalized.toLowerCase(Locale.ROOT);
+        normalized = stripGroupingCharacters(normalized);
         for (String extension : List.of(".exe", ".cmd", ".bat")) {
             if (normalized.endsWith(extension)) {
                 return normalized.substring(0, normalized.length() - extension.length());
             }
         }
         return normalized;
+    }
+
+    private static String stripGroupingCharacters(String executable) {
+        int start = 0;
+        int end = executable.length();
+        while (start < end && (executable.charAt(start) == '(' || executable.charAt(start) == '{')) {
+            start++;
+        }
+        while (end > start
+                && (executable.charAt(end - 1) == ')' || executable.charAt(end - 1) == '}')) {
+            end--;
+        }
+        return executable.substring(start, end);
     }
 
     private static boolean hasRmRecursiveFlag(List<String> arguments) {
@@ -521,7 +537,7 @@ public final class CommandRiskAnalyzer {
                 return source.length() - 1;
             }
             append(source.substring(index, extraction.endIndex() + 1));
-            nestedCommands.add(new NestedCommand(extraction.content(), dialect));
+            addNestedCommand(new NestedCommand(extraction.content(), dialect));
             return extraction.endIndex();
         }
 
@@ -572,7 +588,7 @@ public final class CommandRiskAnalyzer {
                 }
                 if (value == '`') {
                     append(source.substring(index, endIndex + 1));
-                    nestedCommands.add(new NestedCommand(
+                    addNestedCommand(new NestedCommand(
                             source.substring(index + 1, endIndex),
                             ShellDialect.BASH));
                     return endIndex;
@@ -658,7 +674,15 @@ public final class CommandRiskAnalyzer {
 
             String executable = current.words.get(0);
             int argumentStart = 1;
-            if (dialect == ShellDialect.POWERSHELL && executable.equals("&")) {
+            if (dialect == ShellDialect.BASH
+                    && (executable.equals("(") || executable.equals("{"))) {
+                if (current.words.size() < 2) {
+                    risk = parseRisk("Shell 分组符后缺少命令");
+                    return;
+                }
+                executable = current.words.get(1);
+                argumentStart = 2;
+            } else if (dialect == ShellDialect.POWERSHELL && executable.equals("&")) {
                 if (current.words.size() < 2) {
                     risk = parseRisk("PowerShell 调用运算符后缺少命令");
                     return;
@@ -684,6 +708,13 @@ public final class CommandRiskAnalyzer {
             sawConnector = connector != Connector.END;
             if (connector != Connector.PIPE) {
                 pipelineIndex++;
+            }
+        }
+
+        private void addNestedCommand(NestedCommand nestedCommand) {
+            nestedCommands.add(nestedCommand);
+            if (nestedCommands.size() > MAX_NESTED_COMMANDS) {
+                risk = limitRisk();
             }
         }
 

@@ -102,4 +102,17 @@ class CommandRiskAnalyzerTest {
         assertNotNull(overflow.risk());
         assertEquals("PARSE_LIMIT", overflow.risk().code());
     }
+
+    @Test
+    void rejectsOversizedInputAndTooManyNestedCommands() {
+        CommandRiskAnalyzer.Analysis oversized = analyzer.analyze(
+                "echo " + "x".repeat(65_537), ShellDialect.BASH);
+        assertNotNull(oversized.risk());
+        assertEquals("PARSE_LIMIT", oversized.risk().code());
+
+        CommandRiskAnalyzer.Analysis nested = analyzer.analyze(
+                "echo " + "$(pwd)".repeat(129), ShellDialect.BASH);
+        assertNotNull(nested.risk());
+        assertEquals("PARSE_LIMIT", nested.risk().code());
+    }
 }
