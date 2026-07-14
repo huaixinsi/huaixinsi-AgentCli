@@ -2,6 +2,7 @@ package com.paicli.hitl;
 
 import com.paicli.browser.BrowserCheckResult;
 import com.paicli.policy.AuditLog;
+import com.paicli.policy.ToolCallRisk;
 import com.paicli.tool.ToolOutput;
 import com.paicli.tool.ToolRegistry;
 
@@ -35,11 +36,24 @@ public class HitlToolRegistry extends ToolRegistry {
     @Override
     public ToolOutput executeToolOutput(String name, String argumentsJson) {
         // HITL 未启用或该工具不需要审批，直接执行
-        if (!hitlHandler.isEnabled() || !ApprovalPolicy.requiresApproval(name)) {
+        if (!hitlHandler.isEnabled()) {
+            return super.doExecuteTool(name, argumentsJson);
+        }
+        ToolCallRisk toolRisk = previewToolCallRisk(name, argumentsJson);
+        if (toolRisk.blocked()) {
             return super.doExecuteTool(name, argumentsJson);
         }
         BrowserCheckResult browserCheck = checkBrowserTool(name, argumentsJson, true);
         if (browserCheck.blocked()) {
+            return super.doExecuteTool(name, argumentsJson);
+        }
+        if (toolRisk.requiresPerCallApproval()) {
+            return executeAfterExplicitApproval(
+                    name,
+                    argumentsJson,
+                    combineNotices(toolRisk.reason(), browserCheck.sensitiveNotice()));
+        }
+        if (!ApprovalPolicy.requiresApproval(name)) {
             return super.doExecuteTool(name, argumentsJson);
         }
         if (browserCheck.requiresPerCallApproval()) {
@@ -51,6 +65,16 @@ public class HitlToolRegistry extends ToolRegistry {
         }
 
         return executeAfterExplicitApproval(name, argumentsJson, null);
+    }
+
+    private String combineNotices(String first, String second) {
+        if (first == null || first.isBlank()) {
+            return second;
+        }
+        if (second == null || second.isBlank()) {
+            return first;
+        }
+        return first + "\n" + second;
     }
 
     private ToolOutput executeAfterExplicitApproval(String name, String argumentsJson, String sensitiveNotice) {

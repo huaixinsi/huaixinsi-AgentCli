@@ -16,10 +16,12 @@ import com.paicli.rag.CodeRetriever;
 import com.paicli.rag.SearchResultFormatter;
 import com.paicli.rag.VectorStore;
 import com.paicli.policy.AuditLog;
-import com.paicli.policy.CommandGuard;
+import com.paicli.policy.CommandFileAccessAnalyzer;
 import com.paicli.policy.PathGuard;
 import com.paicli.policy.PolicyException;
+import com.paicli.policy.SensitivePathPolicy;
 import com.paicli.policy.ShellDialect;
+import com.paicli.policy.ToolCallRisk;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.snapshot.RestoreResult;
 import com.paicli.snapshot.SnapshotService;
@@ -96,6 +98,7 @@ public class ToolRegistry {
     private LspManager lspManager = new LspManager(projectPath);
     private SnapshotService snapshotService = SnapshotService.forProject(Path.of(projectPath));
     private boolean customSnapshotService;
+    private final CommandFileAccessAnalyzer commandFileAccessAnalyzer = new CommandFileAccessAnalyzer();
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -1131,6 +1134,49 @@ public class ToolRegistry {
         return browserGuard.check(name, argumentsJson, !previewOnly);
     }
 
+    protected ToolCallRisk previewToolCallRisk(String name, String argumentsJson) {
+        try {
+            JsonNode args = mapper.readTree(argumentsJson);
+            return switch (name) {
+                case "read_file" -> previewPathArgument(args, "path", false);
+                case "write_file", "create_project" -> previewPathArgument(args, pathFieldFor(name), true);
+                case "execute_command" -> previewCommand(args);
+                default -> ToolCallRisk.allow();
+            };
+        } catch (PolicyException e) {
+            return ToolCallRisk.block(e.getMessage());
+        } catch (Exception e) {
+            return ToolCallRisk.allow();
+        }
+    }
+
+    private ToolCallRisk previewCommand(JsonNode args) {
+        String command = args.path("command").asText("");
+        if (command.isBlank()) {
+            return ToolCallRisk.allow();
+        }
+        ShellDialect dialect = ShellDialect.current();
+        return commandFileAccessAnalyzer.analyze(command, dialect, pathGuard.getRootPath());
+    }
+
+    private ToolCallRisk previewPathArgument(JsonNode args, String field, boolean write) {
+        String path = args.path(field).asText("");
+        if (path.isBlank()) {
+            return ToolCallRisk.allow();
+        }
+        Path safe = pathGuard.resolveSafe(path);
+        if (SensitivePathPolicy.isSensitive(safe)) {
+            String operation = write ? "写入" : "读取";
+            return ToolCallRisk.requireApproval(operation + "敏感文件: "
+                    + pathGuard.getRootPath().relativize(safe));
+        }
+        return ToolCallRisk.allow();
+    }
+
+    private String pathFieldFor(String toolName) {
+        return "create_project".equals(toolName) ? "name" : "path";
+    }
+
     public AuditLog getAuditLog() {
         return auditLog;
     }
@@ -1237,11 +1283,11 @@ public class ToolRegistry {
             return "执行命令失败: 命令不能为空";
         }
         ShellDialect dialect = ShellDialect.current();
-        String denyReason = CommandGuard.check(normalized, dialect);
-        if (denyReason != null) {
+        ToolCallRisk commandRisk = commandFileAccessAnalyzer.analyze(normalized, dialect, pathGuard.getRootPath());
+        if (commandRisk.blocked()) {
             // 抛 PolicyException 让外层 executeTool 统一写 audit 并格式化拒绝消息，
             // 命令围栏与路径围栏的拒绝路径走同一个出口。
-            throw new PolicyException(denyReason);
+            throw new PolicyException(commandRisk.reason());
         }
 
         ExecutorService outputReaderExecutor = Executors.newSingleThreadExecutor(r -> {

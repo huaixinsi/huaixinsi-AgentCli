@@ -109,7 +109,7 @@ src/main/java/com/paicli/
 - 拦截顺序：HitlToolRegistry → ToolRegistry → PathGuard/CommandGuard
 - 用户无法批准策略拒绝的请求
 - PathGuard 强制路径限定在项目根内
-- CommandGuard 委托 CommandRiskAnalyzer 做有界结构化分析，仍是辅助防线而非沙箱
+- CommandGuard 委托 CommandRiskAnalyzer 做有界结构化分析，CommandFileAccessAnalyzer 负责命令内显式文件读写的工作区与敏感路径预检；二者仍是辅助防线而非沙箱
 
 ### Plan 审阅交互
 

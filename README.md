@@ -88,6 +88,14 @@ flowchart LR
 - 该能力仍是 HITL 前的辅助防线，不是完整 Shell 解析器或进程沙箱
 - 详细记录见 [docs/phase-26-command-risk-analysis.md](docs/phase-26-command-risk-analysis.md)
 
+### 第五期优化：工具拦截增强
+
+- Prompt 层明确禁止主动构造 `sudo`、全盘 `rm -rf`、`mkfs`、`dd of=/dev`、`curl | sh` 等高危操作
+- 业务层在执行命令前识别显式文件读写，文件路径必须能证明位于当前项目工作区内，否则直接拒绝
+- 对 `.env`、私钥、token/password/credential 命名文件，以及 `.ssh`、`.aws`、`.kube` 等敏感路径读写触发单次确认
+- 命令中的文件写入/删除不再被“本会话全部放行”缓存绕过，仍会强制二次确认
+- 详细记录见 [docs/phase-27-tool-interception-hardening.md](docs/phase-27-tool-interception-hardening.md)
+
 详细设想见 [docs/agent-routing-vision.md](docs/agent-routing-vision.md)。
 
 ## 后续演进

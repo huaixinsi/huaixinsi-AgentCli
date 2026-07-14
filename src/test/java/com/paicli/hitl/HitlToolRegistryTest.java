@@ -65,6 +65,7 @@ class HitlToolRegistryTest {
         Path target = tempDir.resolve("should-not-exist.txt");
         StubHandler stub = new StubHandler(req -> ApprovalResult.reject("too risky"));
         HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
 
         String result = registry.executeTool("write_file",
                 "{\"path\":\"" + target.toString().replace("\\", "\\\\") + "\",\"content\":\"x\"}");
@@ -80,6 +81,7 @@ class HitlToolRegistryTest {
         Path target = tempDir.resolve("skipped.txt");
         StubHandler stub = new StubHandler(req -> ApprovalResult.skip());
         HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
 
         String result = registry.executeTool("write_file",
                 "{\"path\":\"" + target.toString().replace("\\", "\\\\") + "\",\"content\":\"x\"}");
@@ -197,11 +199,58 @@ class HitlToolRegistryTest {
         assertEquals(0, stub.requestCount());
     }
 
+    @Test
+    void sensitiveReadFileRequiresApproval(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve(".env"), "TOKEN=secret");
+        StubHandler stub = new StubHandler(req -> ApprovalResult.approve());
+        HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("read_file", "{\"path\":\".env\"}");
+
+        assertTrue(result.contains("TOKEN=secret"));
+        assertEquals(1, stub.requestCount());
+        assertNotNull(stub.received.get(0).sensitiveNotice());
+        assertTrue(stub.received.get(0).sensitiveNotice().contains("敏感文件"));
+    }
+
+    @Test
+    void commandWorkspaceWriteBypassesApprovedAllToolCache(@TempDir Path tempDir) {
+        StubHandler stub = new StubHandler(req -> ApprovalResult.approve());
+        stub.approveTool("execute_command");
+        HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("execute_command", "{\"command\":\"echo hi > out.txt\"}");
+
+        assertTrue(result.contains("exit code"));
+        assertEquals(1, stub.requestCount());
+        assertNotNull(stub.received.get(0).sensitiveNotice());
+        assertTrue(stub.received.get(0).sensitiveNotice().contains("写入"));
+    }
+
+    @Test
+    void commandOutsideWorkspaceWriteIsRejectedBeforeApproval(@TempDir Path tempDir) {
+        Path outside = tempDir.getParent().resolve("outside-hitl.txt");
+        StubHandler stub = new StubHandler(req -> {
+            throw new AssertionError("policy-denied command should not ask for approval");
+        });
+        HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
+
+        String escaped = outside.toString().replace("\\", "\\\\");
+        String result = registry.executeTool("execute_command", "{\"command\":\"echo hi > " + escaped + "\"}");
+
+        assertTrue(result.contains("策略") || result.contains("Policy") || result.contains("拒绝"));
+        assertEquals(0, stub.requestCount());
+    }
+
     /** 可预设决策结果的 HitlHandler stub。 */
     private static final class StubHandler implements HitlHandler {
         private final Function<ApprovalRequest, ApprovalResult> decision;
         private final List<ApprovalRequest> received = new ArrayList<>();
         private final List<String> approvedServers = new ArrayList<>();
+        private final List<String> approvedTools = new ArrayList<>();
         private boolean enabled = true;
 
         StubHandler(Function<ApprovalRequest, ApprovalResult> decision) {
@@ -230,6 +279,15 @@ class HitlToolRegistryTest {
 
         void approveServer(String serverName) {
             approvedServers.add(serverName);
+        }
+
+        void approveTool(String toolName) {
+            approvedTools.add(toolName);
+        }
+
+        @Override
+        public boolean isApprovedAllByTool(String toolName) {
+            return approvedTools.contains(toolName);
         }
 
         @Override
